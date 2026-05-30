@@ -1,0 +1,8 @@
+{
+  "name": "Freelance OS",
+  "description": "An AI-powered freelance operating system and assistant to discover opportunities, generate highly-targeted proposals, and get reports via Telegram.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
