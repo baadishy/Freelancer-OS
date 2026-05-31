@@ -617,14 +617,20 @@ export async function submitProposalViaPlaywright(proposalId: string): Promise<{
   }
 }
 
+function cleanScrapedUrl(urlStr: string): string {
+  // Return original link intact, as explicitly requested by the user
+  return urlStr || '';
+}
+
 /**
  * Scrapes project lists from the freelance platform using the persistent Chrome session profile.
  */
-export async function scrapePlatformJobsPlaywright(platform: 'Khamsat' | 'Mostaql' | 'Fiverr'): Promise<any[]> {
+export async function scrapePlatformJobsPlaywright(platform: 'Khamsat' | 'Mostaql' | 'Fiverr', skills?: string[]): Promise<any[]> {
   const profileDir = path.join(process.cwd(), 'data', 'browser-profiles', platform.toLowerCase());
   
+  // Ensure the directory is initialized so Playwright can run persistency cleanly
   if (!fs.existsSync(profileDir)) {
-    return []; // No persistent profile directory exists yet, bypass real scraper
+    fs.mkdirSync(profileDir, { recursive: true });
   }
 
   let context: BrowserContext | null = null;
@@ -640,27 +646,64 @@ export async function scrapePlatformJobsPlaywright(platform: 'Khamsat' | 'Mostaq
     } else if (platform === 'Mostaql') {
       scrapeUrl = 'https://mostaql.com/projects';
     } else if (platform === 'Fiverr') {
-      scrapeUrl = 'https://www.fiverr.com';
+      const keyword = (skills && skills.length > 0) ? skills[0] : 'Web Development';
+      scrapeUrl = `https://www.fiverr.com/search/gigs?query=${encodeURIComponent(keyword)}`;
     }
 
-    await page.goto(scrapeUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    db.addLog('info', 'scraper', `Playwright navigating to ${platform} public listing URL: ${scrapeUrl}...`);
+    await page.goto(scrapeUrl, { waitUntil: 'domcontentloaded', timeout: 35000 });
+    
+    // Give some space for dynamic lazy loads
+    await page.waitForTimeout(2000);
 
     // Extract raw project details based on platform
     if (platform === 'Khamsat') {
       const items = await page.evaluate(() => {
         const jobsList: any[] = [];
-        const links = document.querySelectorAll('a[href*="/community/requests/"]');
-        links.forEach((link: any, index) => {
-          if (index < 5) { // Grab first 5 items
+        const anchors = Array.from(document.querySelectorAll('a'));
+        const seen = new Set();
+        let index = 0;
+        
+        for (const link of anchors) {
+          const href = link.href || '';
+          // Ensure it's a real request detail URL rather than a pagination or list page
+          const isRequestDetail = href.includes('/community/requests/') && href.match(/\/community\/requests\/\d+/);
+          if (isRequestDetail && !seen.has(href)) {
+            seen.add(href);
             const title = link.textContent?.trim() || '';
-            const href = link.href || '';
-            const rowElem = link.closest('tr') || link.closest('div');
-            const desc = rowElem?.textContent?.trim() || 'Details on page...';
-            if (title && href) {
-              jobsList.push({ title, href, desc });
+            if (!title || title.length < 5) continue;
+            
+            const rowElem = link.closest('tr') || link.closest('div.table-responsive') || link.closest('li') || link.closest('div');
+            
+            // Extract the relative time from Khamsat list element
+            let publishedAt = 'Just now';
+            if (rowElem) {
+              const elements = Array.from(rowElem.querySelectorAll('span, small, td, div, i'));
+              for (const el of elements) {
+                const text = el.textContent?.trim() || '';
+                if (text.startsWith('منذ ') && text.length < 35) {
+                  publishedAt = text;
+                  break;
+                }
+              }
             }
+            
+            // Extract a cleaner description if possible by finding table-cell texts or summary text
+            let desc = 'No explicit description provided...';
+            if (rowElem) {
+              const textContent = rowElem.textContent || '';
+              // Try to remove title from textContent to just get the body Description
+              const cleaned = textContent.replace(title, '').replace(/\s+/g, ' ').trim();
+              if (cleaned.length > 20) {
+                desc = cleaned;
+              }
+            }
+            
+            jobsList.push({ title, href, desc, publishedAt });
+            index++;
+            if (index >= 12) break; // Grab up to 12 items
           }
-        });
+        }
         return jobsList;
       });
 
@@ -668,28 +711,60 @@ export async function scrapePlatformJobsPlaywright(platform: 'Khamsat' | 'Mostaq
         scrapedJobs.push({
           title: item.title,
           link: item.href,
-          description: item.desc.substring(0, 300),
-          clientName: 'Khamsat Buyer',
-          budget: '$50 - $150',
-          category: 'Community Requests',
-          language: 'ar'
+          description: item.desc.substring(0, 450),
+          clientName: 'Khamsat Client',
+          budget: '$25 - $100',
+          category: 'تطوير مواقع وتطبيقات',
+          language: 'ar',
+          publishedAt: item.publishedAt,
+          isActive: !item.publishedAt.includes('Ended') && !item.publishedAt.includes('منتهي')
         });
       }
     } else if (platform === 'Mostaql') {
       const items = await page.evaluate(() => {
         const jobsList: any[] = [];
-        const titles = document.querySelectorAll('.project-title a, a[href*="/project/"]');
-        titles.forEach((elem: any, index) => {
-          if (index < 5) {
-            const title = elem.textContent?.trim() || '';
-            const href = elem.href || '';
-            const card = elem.closest('.project-row') || elem.closest('tr') || elem.closest('div');
-            const desc = card?.textContent?.trim() || 'Requires description...';
-            if (title && href) {
-              jobsList.push({ title, href, desc });
+        const anchors = Array.from(document.querySelectorAll('a'));
+        const seen = new Set();
+        let index = 0;
+        
+        for (const link of anchors) {
+          const href = link.href || '';
+          // Ensure it's a real project detail link rather than global project listing
+          const isProjectDetail = href.includes('/project/') && href.match(/\/project\/\d+/);
+          if (isProjectDetail && !seen.has(href)) {
+            seen.add(href);
+            const title = link.textContent?.trim() || '';
+            if (!title || title.length < 5) continue;
+            
+            const card = link.closest('.project-row') || link.closest('tr') || link.closest('div.card') || link.closest('div');
+            
+            // Extract relative time from Mostaql post element
+            let publishedAt = 'Just now';
+            if (card) {
+              const elements = Array.from(card.querySelectorAll('span, small, td, div, time, i'));
+              for (const el of elements) {
+                const text = el.textContent?.trim() || '';
+                if (text.startsWith('منذ ') && text.length < 35) {
+                  publishedAt = text;
+                  break;
+                }
+              }
             }
+            
+            let desc = 'No explicit description provided...';
+            if (card) {
+              const textContent = card.textContent || '';
+              const cleaned = textContent.replace(title, '').replace(/\s+/g, ' ').trim();
+              if (cleaned.length > 20) {
+                desc = cleaned;
+              }
+            }
+            
+            jobsList.push({ title, href, desc, publishedAt });
+            index++;
+            if (index >= 12) break; // Grab up to 12 items
           }
-        });
+        }
         return jobsList;
       });
 
@@ -697,42 +772,54 @@ export async function scrapePlatformJobsPlaywright(platform: 'Khamsat' | 'Mostaq
         scrapedJobs.push({
           title: item.title,
           link: item.href,
-          description: item.desc.substring(0, 400),
+          description: item.desc.substring(0, 450),
           clientName: 'Mostaql Client',
-          budget: '$250 - $500',
+          budget: '$100 - $250',
           category: 'Programming & Development',
-          language: 'ar'
+          language: 'ar',
+          publishedAt: item.publishedAt,
+          isActive: !item.publishedAt.includes('Ended') && !item.publishedAt.includes('منتهي')
         });
       }
     } else if (platform === 'Fiverr') {
       const items = await page.evaluate(() => {
         const jobsList: any[] = [];
-        const titles = document.querySelectorAll('a[href*="/search/gigs"], .gig-wrapper a');
-        titles.forEach((elem: any, index) => {
-          if (index < 3) {
-            const title = elem.textContent?.trim() || 'Custom Gig Setup';
-            const href = elem.href || 'https://fiverr.com';
-            if (title && href) {
-              jobsList.push({ title, href });
-            }
+        const tags = Array.from(document.querySelectorAll('a'));
+        const seen = new Set();
+        let index = 0;
+        
+        for (const link of tags) {
+          const href = link.href || '';
+          const isGig = href.includes('/gigs/') || href.includes('/services/') || href.match(/fiverr\.com\/[a-zA-Z0-9_\-]+\/[a-zA-Z0-9_\-]+/);
+          if (isGig && !href.includes('/search/') && !href.includes('/categories/') && !href.includes('/support') && !seen.has(href)) {
+            seen.add(href);
+            const title = link.textContent?.trim() || 'Custom Development Asset';
+            jobsList.push({ title, href });
+            index++;
+            if (index >= 8) break;
           }
-        });
+        }
         return jobsList;
       });
 
       for (const item of items) {
         scrapedJobs.push({
-          title: item.title || 'React/Node Web Optimization',
+          title: item.title || 'React/Node Web Optimization Specialist',
           link: item.href || 'https://www.fiverr.com',
-          description: 'Custom full-stack web application development and bug fixing with modern technologies.',
+          description: 'Looking to hire a professional developer for quick web application improvements, routing, or bug fixes.',
           clientName: 'Fiverr Buyer',
-          budget: '$150',
+          budget: '$75',
           category: 'Web Development',
-          language: 'en'
+          language: 'en',
+          publishedAt: 'Just now',
+          isActive: true
         });
       }
     }
     
+    if (scrapedJobs.length > 0) {
+      db.addLog('success', 'scraper', `Playwright successfully extracted ${scrapedJobs.length} active live opportunities from public ${platform} pages!`);
+    }
   } catch (err: any) {
     db.addLog('warning', 'scraper', `Real Playwright persistent scan failed on ${platform}: ${err.message}.`);
     if (err.message.includes('auth') || err.message.includes('login') || err.message.includes('redirect')) {

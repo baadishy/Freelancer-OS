@@ -80,7 +80,7 @@ const DEFAULT_AUTOMATION: AutomationSettings = {
   scrapeIntervalMinutes: 30,
   dailySubmissionLimit: 5,
   autoApproveMinScore: 85,
-  geminiModel: 'gemini-2.5-flash'
+  geminiModel: 'gemini-3.5-flash'
 };
 
 const INITIAL_DB_STATE: Schema = {
@@ -145,10 +145,10 @@ class LocalDB {
       };
       
       const model = merged.automationSettings.geminiModel;
-      const deprecated = ['gemini-1.5-flash', 'gemini-pro', 'gemini-2.0-flash'];
-      const deprecatedPro = ['gemini-1.5-pro', 'gemini-2.0-pro'];
+      const deprecated = ['gemini-1.5-flash', 'gemini-pro', 'gemini-2.0-flash', 'gemini-2.5-flash'];
+      const deprecatedPro = ['gemini-1.5-pro', 'gemini-2.0-pro', 'gemini-2.5-pro'];
       if (deprecated.includes(model)) {
-        merged.automationSettings.geminiModel = 'gemini-2.5-flash';
+        merged.automationSettings.geminiModel = 'gemini-3.5-flash';
       } else if (deprecatedPro.includes(model)) {
         merged.automationSettings.geminiModel = 'gemini-3.1-pro-preview';
       }

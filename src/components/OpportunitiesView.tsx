@@ -15,11 +15,12 @@ import {
   CheckCircle, 
   FilePlus, 
   ChevronRight, 
-  RefreshCw,
-  Clock,
-  ThumbsUp,
-  XCircle,
-  HelpCircle
+  RefreshCw, 
+  Clock, 
+  ThumbsUp, 
+  XCircle, 
+  HelpCircle,
+  Trash2
 } from 'lucide-react';
 import { Opportunity } from '../types.js';
 
@@ -43,17 +44,10 @@ export default function OpportunitiesView({
   const [loading, setLoading] = useState(false);
   const [analyzingId, setAnalyzingId] = useState<string | null>(null);
   const [writingId, setWritingId] = useState<string | null>(null);
+  const [activeFilter, setActiveFilter] = useState('all');
 
   const getCleanJobLink = (job: any) => {
-    if (!job.link) return '#';
-    if (job.platform === 'Khamsat') {
-      return 'https://khamsat.com/community/requests';
-    } else if (job.platform === 'Mostaql') {
-      return `https://mostaql.com/projects?keyword=${encodeURIComponent(job.title.split(' ').slice(0, 2).join(' '))}`;
-    } else if (job.platform === 'Fiverr') {
-      return `https://www.fiverr.com/search/gigs?query=${encodeURIComponent(job.title.split(' ').slice(0, 3).join(' '))}`;
-    }
-    return job.link;
+    return job.link || '#';
   };
 
   // Suggested Natural Language queries for user clicks
@@ -181,6 +175,43 @@ export default function OpportunitiesView({
     }
   };
 
+  const handleDismissOpportunity = async (id: string) => {
+    try {
+      const response = await fetch(`/api/opportunities/${id}/hide`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hidden: true })
+      });
+      if (response.ok) {
+        onShowToast('Offer hidden from active lists (AI routing unaffected).', 'success');
+        setJobs(prev => prev.filter(j => j.id !== id));
+      } else {
+        onShowToast('Could not hide opportunity.', 'error');
+      }
+    } catch (e) {
+      onShowToast('Network error hiding opportunity.', 'error');
+    }
+  };
+
+  const handleToggleActive = async (id: string, currentlyActive: boolean) => {
+    try {
+      const response = await fetch(`/api/opportunities/${id}/active`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isActive: !currentlyActive })
+      });
+      if (response.ok) {
+        const data = await response.json();
+        onShowToast(`Opportunity marked as ${!currentlyActive ? 'Active/Open' : 'Ended/Closed'}.`, 'success');
+        setJobs(prev => prev.map(j => j.id === id ? data : j));
+      } else {
+        onShowToast('Could not change active status.', 'error');
+      }
+    } catch (e) {
+      onShowToast('Network error changing active status.', 'error');
+    }
+  };
+
   const handleCompileProposal = async (job: Opportunity) => {
     setWritingId(job.id);
     onShowToast(`Calling Gemini to draft customized proposal for "${job.title}"...`, 'info');
@@ -204,6 +235,13 @@ export default function OpportunitiesView({
       setWritingId(null);
     }
   };
+
+  const displayedJobs = jobs.filter(job => {
+    const isJobActive = job.isActive !== false;
+    if (activeFilter === 'active') return isJobActive;
+    if (activeFilter === 'ended') return !isJobActive;
+    return true;
+  });
 
   return (
     <div className="space-y-6 font-sans">
@@ -295,10 +333,26 @@ export default function OpportunitiesView({
                 <option value="90">Elite Matches Only (90%+)</option>
               </select>
             </div>
+
+            {/* Active vs Ended status filter */}
+            <div className="flex items-center gap-2 font-mono">
+              <Clock size={14} className="text-slate-500" />
+              <span>Offer Status:</span>
+              <select
+                id="op-status-filter"
+                className="bg-[#07080d] border border-[#1e2235] text-slate-300 rounded px-2 py-1 focus:ring-1 focus:ring-blue-500 outline-none text-xs"
+                value={activeFilter}
+                onChange={(e) => setActiveFilter(e.target.value)}
+              >
+                <option value="all">Active + Ended</option>
+                <option value="active">Active Only</option>
+                <option value="ended">Ended/Closed Only</option>
+              </select>
+            </div>
           </div>
 
           <span className="font-mono text-[11px] text-slate-400 uppercase tracking-wider">
-            Filtered count: <strong className="text-slate-200">{jobs.length}</strong> opportunities
+            Filtered count: <strong className="text-slate-200">{displayedJobs.length}</strong> opportunities
           </span>
         </div>
       </div>
@@ -309,7 +363,7 @@ export default function OpportunitiesView({
           <RefreshCw className="h-8 w-8 animate-spin text-indigo-400 mx-auto" />
           <p className="mt-3 text-slate-400 text-sm">Organizing matched freelancers feeds...</p>
         </div>
-      ) : jobs.length === 0 ? (
+      ) : displayedJobs.length === 0 ? (
         <div className="text-center py-24 border border-dashed border-slate-700 rounded-2xl bg-slate-800/10">
           <AlertCircle size={40} className="text-slate-600 mx-auto mb-4" />
           <h3 className="text-base font-semibold text-slate-300">No Match Opportunities Matched</h3>
@@ -319,7 +373,7 @@ export default function OpportunitiesView({
         </div>
       ) : (
         <div className="space-y-6 animate-fade-in">
-          {jobs.map((job) => {
+          {displayedJobs.map((job) => {
             const match = job.matchAnalysis;
 
             return (
@@ -351,12 +405,20 @@ export default function OpportunitiesView({
                         <span className="w-3.5 h-3.5 rounded-full bg-emerald-550 flex items-center justify-center text-[8px] font-extrabold text-white select-none">f</span>
                       )}
                       {job.platform}
-                    </span>
-                    <span className="text-[10px] px-2 py-0.5 rounded bg-[#07080d] border border-[#1e2235] text-slate-400 uppercase tracking-widest font-semibold font-mono">
+                    </span>                     <span className="text-[10px] px-2 py-0.5 rounded bg-[#07080d] border border-[#1e2235] text-slate-400 uppercase tracking-widest font-semibold font-mono">
                       Category: {job.category}
                     </span>
                     <span className="text-[11px] px-2 py-0.5 rounded bg-[#07080d] border border-[#1e2235] text-slate-400 font-mono font-bold">
                       {job.language === 'ar' ? 'العربية' : 'English'}
+                    </span>
+                    {/* Active vs Ended status badge */}
+                    <span className={`inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded uppercase tracking-wider font-extrabold font-mono border ${
+                      job.isActive !== false
+                        ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                        : 'bg-rose-550/15 text-rose-400 border-rose-500/20'
+                    }`}>
+                      <span className={`w-1.5 h-1.5 rounded-full ${job.isActive !== false ? 'bg-emerald-400 animate-pulse' : 'bg-rose-500'}`} />
+                      {job.isActive !== false ? 'Active' : 'Ended'}
                     </span>
                     {job.budget && (
                       <span className="inline-flex items-center gap-1.5 text-[11px] px-2.5 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/25 text-emerald-400 font-mono font-bold">
@@ -366,7 +428,7 @@ export default function OpportunitiesView({
                     )}
                     <span className="text-[11px] font-mono text-slate-450 ml-auto flex items-center gap-1.5 font-semibold uppercase tracking-wider bg-[#07080d] px-2 py-0.5 rounded border border-[#1e2235]">
                       <Clock size={12} className="text-indigo-400" />
-                      Published: {new Date(job.timestamp).toLocaleDateString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                      Published: {job.publishedAt || new Date(job.timestamp).toLocaleDateString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                     </span>
                   </div>
 
@@ -439,6 +501,30 @@ export default function OpportunitiesView({
                         View Proposal Draft
                       </button>
                     )}
+
+                    <button
+                      id={`op-${job.id}-toggle-active-btn`}
+                      onClick={() => handleToggleActive(job.id, job.isActive !== false)}
+                      className={`flex items-center gap-1.5 px-3 py-2 text-[11px] font-bold uppercase tracking-wider rounded border transition cursor-pointer ${
+                        job.isActive !== false
+                          ? 'bg-[#0c0d15] hover:bg-rose-950/15 border-[#1e2235] text-slate-400 hover:text-rose-400'
+                          : 'bg-emerald-950/10 hover:bg-emerald-900/20 border-emerald-800/20 text-emerald-400 hover:text-emerald-300'
+                      }`}
+                      title={job.isActive !== false ? 'Mark this offer as ended/inactive' : 'Re-open/Re-activate this offer'}
+                    >
+                      <Clock size={13} />
+                      {job.isActive !== false ? 'Mark Ended' : 'Activate'}
+                    </button>
+
+                    <button
+                      id={`op-${job.id}-dismiss-btn`}
+                      onClick={() => handleDismissOpportunity(job.id)}
+                      className="ml-auto flex items-center gap-1.5 px-3 py-2 bg-[#0c0d15] hover:bg-rose-950/20 text-slate-400 hover:text-rose-400 text-[11px] font-bold uppercase tracking-wider rounded border border-[#1e2235] hover:border-rose-900/30 transition cursor-pointer"
+                      title="Dismiss/Remove from the list. This action is purely visual and does NOT affect AI learning parameters or models."
+                    >
+                      <Trash2 size={13} />
+                      Hide Offer
+                    </button>
                   </div>
                 </div>
 

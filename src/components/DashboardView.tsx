@@ -104,6 +104,24 @@ export default function DashboardView({ onNavigate, onShowToast }: DashboardView
     }
   };
 
+  const dismissOpportunity = async (id: string) => {
+    try {
+      const response = await fetch(`/api/opportunities/${id}/hide`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hidden: true })
+      });
+      if (response.ok) {
+        onShowToast('Offer dismissed from display (AI routing unaffected).', 'info');
+        fetchDashboardData();
+      } else {
+        onShowToast('Failed to dismiss opportunity.', 'error');
+      }
+    } catch (e) {
+      onShowToast('Network error dismissing opportunity.', 'error');
+    }
+  };
+
   if (!stats) {
     return (
       <div className="flex h-[80vh] items-center justify-center bg-slate-900">
@@ -309,6 +327,14 @@ export default function DashboardView({ onNavigate, onShowToast }: DashboardView
                         <span className="block text-[8px] text-blue-400 uppercase tracking-widest font-semibold">Match score</span>
                         <span className="text-base font-extrabold text-blue-300">{job.matchAnalysis?.score}%</span>
                       </div>
+                      <button
+                        id={`db-dismiss-job-${job.id}-btn`}
+                        onClick={() => dismissOpportunity(job.id)}
+                        className="p-2.5 bg-[#121522] hover:bg-rose-950/30 text-rose-450 hover:text-rose-400 border border-[#1e2235] hover:border-rose-900/30 rounded-md transition cursor-pointer"
+                        title="Dismiss (does not affect AI)"
+                      >
+                        <Trash2 size={13} />
+                      </button>
                       <button
                         id={`db-view-job-${job.id}-btn`}
                         onClick={() => onNavigate('opportunities', job.id)}

@@ -110,7 +110,7 @@ export default function ProposalQueueView({ onNavigate, onShowToast }: ProposalQ
     }
   };
 
-  const handleSubmitProposal = async (id: string) => {
+  const handleSubmitProposal = async (id: string, extLink?: string) => {
     try {
       const response = await fetch(`/api/proposals/${id}`, {
         method: 'PUT',
@@ -120,6 +120,9 @@ export default function ProposalQueueView({ onNavigate, onShowToast }: ProposalQ
       if (response.ok) {
         onShowToast('Proposal status recorded as Submitted!', 'success');
         fetchProposalsAndJobs();
+        if (extLink && extLink !== '#') {
+          window.open(extLink, '_blank');
+        }
       }
     } catch (e) {
       onShowToast('Failed to record submission.', 'error');
@@ -139,10 +142,10 @@ export default function ProposalQueueView({ onNavigate, onShowToast }: ProposalQ
           onShowToast('SUCCESS! Proposal was posted automatically under your account!', 'success');
         } else {
           onShowToast('Platform Sync Redirect staging completed!', 'success');
-          // Open the tracking/submission link in a secondary tab if available
-          if (data.submittedPlatformLink) {
-            window.open(data.submittedPlatformLink, '_blank');
-          }
+        }
+        // Open the tracking/submission link in a secondary tab if available
+        if (data.submittedPlatformLink && data.submittedPlatformLink !== '#') {
+          window.open(data.submittedPlatformLink, '_blank');
         }
         fetchProposalsAndJobs();
       } else {
@@ -358,7 +361,7 @@ export default function ProposalQueueView({ onNavigate, onShowToast }: ProposalQ
                           
                           <button
                             id={`pq-submit-${prop.id}-btn`}
-                            onClick={() => handleSubmitProposal(prop.id)}
+                            onClick={() => handleSubmitProposal(prop.id, matchedJob?.link)}
                             className="flex items-center gap-1.5 px-3 py-2 bg-[#0d0f19] hover:bg-[#141829] border border-[#1e2235] text-slate-400 text-[11px] font-bold uppercase tracking-wider rounded transition cursor-pointer"
                           >
                             <Send size={13} />

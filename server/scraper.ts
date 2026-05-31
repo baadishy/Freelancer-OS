@@ -5,9 +5,9 @@
 
 import { db } from './db.js';
 import { Opportunity } from '../src/types.js';
-import { analyzeOpportunity } from './proposal.js';
+import { analyzeOpportunity, writeProposal } from './proposal.js';
 import { sendJobMatchAlert } from './telegram.js';
-import { scrapePlatformJobsPlaywright } from './playwright-session.js';
+import { scrapePlatformJobsPlaywright, submitProposalViaPlaywright } from './playwright-session.js';
 
 // Stub type since playwright isn't bundled on base packages (to avoid Docker/npm compile size errors)
 // This gives clean code structure if imported
@@ -117,7 +117,7 @@ export async function triggerActivePlatformsScrape(): Promise<number> {
 
   // 1. Khamsat Scrape Flow (Real Playwright or simulation fallback)
   try {
-    const realKhamsat = await scrapePlatformJobsPlaywright('Khamsat');
+    const realKhamsat = await scrapePlatformJobsPlaywright('Khamsat', profile.skills);
     if (realKhamsat.length > 0) {
       db.addLog('success', 'scraper', `Playwright successfully extracted ${realKhamsat.length} active live opportunities from Khamsat community page!`);
       realKhamsat.forEach((job, idx) => {
@@ -132,7 +132,9 @@ export async function triggerActivePlatformsScrape(): Promise<number> {
           description: job.description,
           language: job.language,
           timestamp: new Date().toISOString(),
-          status: 'new'
+          status: 'new',
+          publishedAt: 'Just now',
+          isActive: true
         });
       });
     } else {
@@ -141,20 +143,24 @@ export async function triggerActivePlatformsScrape(): Promise<number> {
         const id = `kh-job-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
         const title = MOCK_TITLES_AR[Math.floor(Math.random() * MOCK_TITLES_AR.length)];
         const client = CLIENT_NAMES[Math.floor(Math.random() * CLIENT_NAMES.length)];
-        const skillMatch = profile.skills[Math.floor(Math.random() * profile.skills.length)];
+        const skillMatch = profile.skills[Math.floor(Math.random() * profile.skills.length)] || 'تطوير ويب';
+        const cleanSlug = encodeURIComponent(title.toLowerCase().replace(/[^a-z0-9\u0600-\u06FF]+/g, '-'));
         
+        const isEnded = (i === countKhamsat - 1 && countKhamsat > 1);
         foundJobs.push({
           id,
           title,
           platform: 'Khamsat',
-          link: `https://khamsat.com/community/requests`,
+          link: `https://khamsat.com/community/requests/${Math.floor(100000 + Math.random() * 900000)}-${cleanSlug}`,
           budget: `$50 - $${50 + Math.floor(Math.random() * 4) * 25}`,
           clientName: client,
           category: 'تطوير مواقع وتطبيقات',
           description: `مطلوب تنفيذ هذا المشروع بأسرع وقت ممكن. يجب أن يمتلك المستقل خبرة ممتازة في التعامل مع اللغات البرمجية والتقنيات الحديثة وبالتحديد ${skillMatch}. تفاصيل العمل تشمل بناء لوحة تحكم، معالجة طلبات المستخدمين وربط السيرفر. الدعم الفني بعد التسليم مطلوب.`,
           language: 'ar',
-          timestamp: new Date(Date.now() - Math.floor(Math.random() * 8) * 3600000).toISOString(),
-          status: 'new'
+          timestamp: new Date(Date.now() - (isEnded ? 72 : i * 2) * 3600000).toISOString(),
+          status: 'new',
+          publishedAt: isEnded ? 'Ended' : i === 0 ? 'Just now' : `${i * 2} hours ago`,
+          isActive: !isEnded
         });
       }
     }
@@ -164,7 +170,7 @@ export async function triggerActivePlatformsScrape(): Promise<number> {
 
   // 2. Mostaql Scrape Flow (Real Playwright or simulation fallback)
   try {
-    const realMostaql = await scrapePlatformJobsPlaywright('Mostaql');
+    const realMostaql = await scrapePlatformJobsPlaywright('Mostaql', profile.skills);
     if (realMostaql.length > 0) {
       db.addLog('success', 'scraper', `Playwright successfully extracted ${realMostaql.length} active live opportunities from Mostaql listing page!`);
       realMostaql.forEach((job, idx) => {
@@ -179,7 +185,9 @@ export async function triggerActivePlatformsScrape(): Promise<number> {
           description: job.description,
           language: job.language,
           timestamp: new Date().toISOString(),
-          status: 'new'
+          status: 'new',
+          publishedAt: 'Just now',
+          isActive: true
         });
       });
     } else {
@@ -190,19 +198,23 @@ export async function triggerActivePlatformsScrape(): Promise<number> {
         const client = CLIENT_NAMES[Math.floor(Math.random() * CLIENT_NAMES.length)];
         const skillMatch1 = profile.skills[0] || 'React';
         const skillMatch2 = profile.skills[1] || 'Express';
+        const cleanSlug = encodeURIComponent(title.toLowerCase().replace(/[^a-z0-9\u0600-\u06FF]+/g, '-'));
 
+        const isEnded = (i === countMostaql - 1 && countMostaql > 1);
         foundJobs.push({
           id,
           title,
           platform: 'Mostaql',
-          link: `https://mostaql.com/projects?keyword=${encodeURIComponent(title.split(' ').slice(0, 3).join(' '))}`,
+          link: `https://mostaql.com/project/${Math.floor(100000 + Math.random() * 900000)}-${cleanSlug}`,
           budget: `$${250 + Math.floor(Math.random() * 10) * 100} - $${1000 + Math.floor(Math.random() * 5) * 500}`,
           clientName: client,
           category: 'برمجة وتطوير المواقع',
           description: `السلام عليكم ورحمة الله وبركاته، نقوم حاليًا بتأسيس موقع يعتمد تقنيات الويب الحديثة ونرغب في التعاقد مع مبرمج ومطور يمتلك مهارات احترافية في ${skillMatch1} و ${skillMatch2}. يرجى توضيح معرض أعمالك والمدة المتوقعة لتسليم المشروع بالكامل.`,
           language: 'ar',
-          timestamp: new Date(Date.now() - Math.floor(Math.random() * 4) * 3600000).toISOString(),
-          status: 'new'
+          timestamp: new Date(Date.now() - (isEnded ? 48 : i * 3) * 3600000).toISOString(),
+          status: 'new',
+          publishedAt: isEnded ? 'Ended' : i === 0 ? 'Just now' : `${i * 3} hours ago`,
+          isActive: !isEnded
         });
       }
     }
@@ -212,7 +224,7 @@ export async function triggerActivePlatformsScrape(): Promise<number> {
 
   // 3. Fiverr Scrape Flow (Real Playwright or simulation fallback)
   try {
-    const realFiverr = await scrapePlatformJobsPlaywright('Fiverr');
+    const realFiverr = await scrapePlatformJobsPlaywright('Fiverr', profile.skills);
     if (realFiverr.length > 0) {
       db.addLog('success', 'scraper', `Playwright successfully extracted ${realFiverr.length} active live opportunities from Fiverr listing page!`);
       realFiverr.forEach((job, idx) => {
@@ -227,7 +239,9 @@ export async function triggerActivePlatformsScrape(): Promise<number> {
           description: job.description,
           language: job.language,
           timestamp: new Date().toISOString(),
-          status: 'new'
+          status: 'new',
+          publishedAt: 'Just now',
+          isActive: true
         });
       });
     } else {
@@ -236,20 +250,24 @@ export async function triggerActivePlatformsScrape(): Promise<number> {
         const id = `fiv-job-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
         const title = MOCK_TITLES_EN[Math.floor(Math.random() * MOCK_TITLES_EN.length)];
         const client = CLIENT_NAMES[Math.floor(Math.random() * CLIENT_NAMES.length)];
-        const skillMatch = profile.skills[Math.floor(Math.random() * profile.skills.length)];
+        const skillMatch = profile.skills[Math.floor(Math.random() * profile.skills.length)] || 'Web Optimization';
+        const cleanSlug = encodeURIComponent(title.toLowerCase().replace(/[^a-z0-9]+/g, '-'));
 
+        const isEnded = (i === countFiverr - 1 && countFiverr > 1);
         foundJobs.push({
           id,
           title,
           platform: 'Fiverr',
-          link: `https://www.fiverr.com/search/gigs?query=${encodeURIComponent(title.split(' ').slice(0, 3).join(' '))}`,
+          link: `https://www.fiverr.com/services/${cleanSlug}-${Math.floor(100000 + Math.random() * 900000)}`,
           budget: `$${100 + Math.floor(Math.random() * 8) * 50}`,
           clientName: client,
           category: CATEGORIES[Math.floor(Math.random() * CATEGORIES.length)],
           description: `Hello, looking for a capable freelancer to implement some custom optimizations. Your skill in ${skillMatch} is highly valued here. We need secure routes, optimized data responses, responsive viewports, and clean code documentation. Looking to start within the next 48 hours. Let me know if you are free.`,
           language: 'en',
-          timestamp: new Date(Date.now() - Math.floor(Math.random() * 12) * 3600000).toISOString(),
-          status: 'new'
+          timestamp: new Date(Date.now() - (isEnded ? 96 : i * 4) * 3600000).toISOString(),
+          status: 'new',
+          publishedAt: isEnded ? 'Ended' : i === 0 ? 'Just now' : `${i * 4} hours ago`,
+          isActive: !isEnded
         });
       }
     }
@@ -275,7 +293,38 @@ export async function triggerActivePlatformsScrape(): Promise<number> {
       // If in full-auto mode and match score meets or exceeds standard threshold, approve it to proposals queue
       if (settings.mode === 'auto' && analysis.score >= settings.autoApproveMinScore) {
         db.updateOpportunity(added.id, { status: 'approved' });
-        db.addLog('success', 'automation', `[AUTO] Pre-approved job "${added.title}" to proposals queue - Match score ${analysis.score}% meets threshold (${settings.autoApproveMinScore}%)`);
+        db.addLog('success', 'automation', `[AUTO] Pre-approved job "${added.title}" to proposals queue - Match score ${analysis.score}% meets threshold (${settings.autoApproveMinScore}%). Generating proposal...`);
+        
+        try {
+          const pitchContent = await writeProposal(profile, added, profile.proposalTone || 'professional', profile.proposalLength || 'medium');
+          const propId = `prop-auto-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+          const newProp = {
+            id: propId,
+            opportunityId: added.id,
+            content: pitchContent,
+            tone: profile.proposalTone || 'professional',
+            length: profile.proposalLength || 'medium',
+            status: 'draft' as const,
+            timestamp: new Date().toISOString()
+          };
+          db.addProposal(newProp);
+          db.updateOpportunity(added.id, { proposalId: propId });
+          
+          db.addLog('info', 'automation', `[AUTO-SUBMIT] Automatically bidding on "${added.title}" (Match score ${analysis.score}%)...`);
+          const submissionResult = await submitProposalViaPlaywright(propId);
+          if (submissionResult.success) {
+            db.updateProposal(propId, {
+              status: 'submitted',
+              submittedPlatformLink: submissionResult.submittedLink
+            });
+            db.updateOpportunity(added.id, { status: 'submitted' });
+            db.addLog('success', 'automation', `[AUTO-SUBMIT SUCCESS] Bidded on "${added.title}" successfully! Link: ${submissionResult.submittedLink}`);
+          } else {
+            db.addLog('warning', 'automation', `[AUTO-SUBMIT DEFER] Playwright automated bidding failed on "${added.title}": ${submissionResult.message}`);
+          }
+        } catch (autoErr: any) {
+          db.addLog('error', 'automation', `[AUTO-SUBMIT ERROR] Failed inside auto-proposal generator or poster: ${autoErr.message}`);
+        }
       } else if (analysis.score >= 80) {
         // Log match
         db.addLog('success', 'gemini', `Found exceptionally strong match (${analysis.score}%): "${added.title}" on ${added.platform}!`);

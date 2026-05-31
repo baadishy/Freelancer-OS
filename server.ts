@@ -433,8 +433,13 @@ async function startServer() {
   // ==========================================
   app.get('/api/opportunities', (req, res) => {
     try {
-      const { platform, search, minScore } = req.query;
+      const { platform, search, minScore, includeHidden } = req.query;
       let ops = db.getOpportunities();
+
+      // Filter hidden ones by default
+      if (includeHidden !== 'true') {
+        ops = ops.filter(o => !o.hidden);
+      }
 
       // Platform filter
       if (platform && platform !== 'all') {
@@ -545,6 +550,26 @@ async function startServer() {
       res.json(updated);
     } catch (err: any) {
       res.status(500).json({ error: err.message || 'Status update failed.' });
+    }
+  });
+
+  app.put('/api/opportunities/:id/hide', (req, res) => {
+    try {
+      const { hidden } = req.body;
+      const updated = db.updateOpportunity(req.params.id, { hidden: !!hidden });
+      res.json(updated);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Failed to update opportunity visibility.' });
+    }
+  });
+
+  app.put('/api/opportunities/:id/active', (req, res) => {
+    try {
+      const { isActive } = req.body;
+      const updated = db.updateOpportunity(req.params.id, { isActive: !!isActive });
+      res.json(updated);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Failed to update opportunity active status.' });
     }
   });
 
@@ -1104,6 +1129,19 @@ async function startServer() {
                 },
                 required: ["proposalId"]
               }
+            },
+            {
+              name: "scrape_vet_and_autosubmit",
+              description: "Strips or scrapes active freelance platforms in real-time. Matches candidate jobs using Gemini, auto-drafts the proposals, auto-posts/submits them via Playwright, and outputs the exact submitted URLs for matches >= minScore (e.g., 85).",
+              parameters: {
+                type: Type.OBJECT,
+                properties: {
+                  minScore: {
+                    type: Type.NUMBER,
+                    description: "The minimum score threshold out of 100 to trigger auto-submitting. Defaults to 85."
+                  }
+                }
+              }
             }
           ]
         }
@@ -1196,6 +1234,88 @@ async function startServer() {
                   toolMessage += `Agent tried to bid automatically on proposal "${propId}" for ${op.platform} but browser failed: ${result.message}\n`;
                 }
               }
+            }
+          }
+          else if (name === 'scrape_vet_and_autosubmit') {
+            const minScore = args.minScore !== undefined ? Number(args.minScore) : 85;
+            toolMessage += `Agent initiating an urgent live platforms scrape, analysis, and auto-submit operation for projects matching >= ${minScore}%\n`;
+            
+            try {
+              // Trigger active platform scrape synchronously so we wait for fresh entries
+              await triggerActivePlatformsScrape();
+              
+              const currentOps = db.getOpportunities();
+              const profile = db.getProfile();
+              const processedGigs: { title: string; platform: string; link: string; score: number; submitted: boolean; details?: string }[] = [];
+              
+              for (const op of currentOps) {
+                // If opportunity has high matching score and has not been drafted/submitted
+                if (op.matchAnalysis && op.matchAnalysis.score >= minScore && op.status !== 'submitted' && !op.proposalId) {
+                  db.addLog('info', 'automation', `[AGENT AUTO-RUN] Generating tailored proposal for "${op.title}" (${op.matchAnalysis.score}%)...`);
+                  
+                  const pitchContent = await writeProposal(profile, op, profile.proposalTone || 'professional', profile.proposalLength || 'medium');
+                  const propId = `prop-auto-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+                  const newProp = {
+                    id: propId,
+                    opportunityId: op.id,
+                    content: pitchContent,
+                    tone: profile.proposalTone || 'professional',
+                    length: profile.proposalLength || 'medium',
+                    status: 'draft' as const,
+                    timestamp: new Date().toISOString()
+                  };
+                  db.addProposal(newProp);
+                  db.updateOpportunity(op.id, { proposalId: propId });
+                  
+                  db.addLog('info', 'automation', `[AGENT AUTO-RUN] Posting proposal to ${op.platform} via secure browser...`);
+                  const submission = await submitProposalViaPlaywright(propId);
+                  
+                  if (submission.success) {
+                    db.updateProposal(propId, {
+                      status: 'submitted',
+                      submittedPlatformLink: submission.submittedLink
+                    });
+                    db.updateOpportunity(op.id, { status: 'submitted' });
+                    db.addLog('success', 'automation', `[AGENT AUTO-RUN SUCCESS] Bidded on "${op.title}": ${submission.submittedLink}`);
+                    processedGigs.push({
+                      title: op.title,
+                      platform: op.platform,
+                      link: submission.submittedLink,
+                      score: op.matchAnalysis.score,
+                      submitted: true,
+                      details: submission.message
+                    });
+                  } else {
+                    db.addLog('warning', 'automation', `[AGENT AUTO-RUN DEFER] Failed auto bidding on "${op.title}": ${submission.message}`);
+                    processedGigs.push({
+                      title: op.title,
+                      platform: op.platform,
+                      link: op.link,
+                      score: op.matchAnalysis.score,
+                      submitted: false,
+                      details: submission.message
+                    });
+                  }
+                }
+              }
+              
+              if (processedGigs.length > 0) {
+                toolMessage += `Sweep finished. Found and processed high-potential freelance listings matching threshold:\n`;
+                processedGigs.forEach((g, idx) => {
+                  toolMessage += `${idx + 1}. [${g.platform}] "${g.title}" (Match: ${g.score}%)\n`;
+                  if (g.submitted) {
+                    toolMessage += `   - STATUS: Bidded successfully!\n`;
+                    toolMessage += `   - LIVE LINK: ${g.link}\n`;
+                  } else {
+                    toolMessage += `   - STATUS: Pitch draft created, but automated submission failed (${g.details}).\n`;
+                    toolMessage += `   - DETAILS/LINK: ${g.link}\n`;
+                  }
+                });
+              } else {
+                toolMessage += `Scrape completed successfully. However, no newly fetched projects in this run matched the required score of >= ${minScore}% in the system.\n`;
+              }
+            } catch (err: any) {
+              toolMessage += `ERROR executing scrape-vet-autosubmit operation: ${err.message || err}\n`;
             }
           }
         }

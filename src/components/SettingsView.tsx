@@ -397,11 +397,9 @@ export default function SettingsView({ onShowToast, onLogout }: SettingsViewProp
                 <select
                   id="settings-auto-model"
                   className="w-full bg-[#07080d] border border-[#1e2235] text-[#b8c2ec] rounded p-[7px] text-xs outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer"
-                  value={autoSettings.geminiModel || 'gemini-2.5-flash'}
+                  value={autoSettings.geminiModel || 'gemini-3.5-flash'}
                   onChange={(e) => handleSaveAutomation({ geminiModel: e.target.value })}
                 >
-                  <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
-                  <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
                   <option value="gemini-3.5-flash">Gemini 3.5 Flash (Recommended)</option>
                   <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro (Preview)</option>
                 </select>

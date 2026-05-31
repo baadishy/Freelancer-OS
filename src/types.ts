@@ -68,6 +68,9 @@ export interface Opportunity {
   status: 'new' | 'ignored' | 'queued' | 'approved' | 'submitted' | 'rejected';
   matchAnalysis?: MatchAnalysis;
   proposalId?: string;
+  hidden?: boolean;
+  publishedAt?: string;
+  isActive?: boolean;
 }
 
 export interface Proposal {
