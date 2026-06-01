@@ -80,7 +80,7 @@ const DEFAULT_AUTOMATION: AutomationSettings = {
   scrapeIntervalMinutes: 30,
   dailySubmissionLimit: 5,
   autoApproveMinScore: 85,
-  geminiModel: 'gemini-3.5-flash'
+  geminiModel: 'gemini-2.5-flash'
 };
 
 const INITIAL_DB_STATE: Schema = {
@@ -145,10 +145,10 @@ class LocalDB {
       };
       
       const model = merged.automationSettings.geminiModel;
-      const deprecated = ['gemini-1.5-flash', 'gemini-pro', 'gemini-2.0-flash', 'gemini-2.5-flash'];
-      const deprecatedPro = ['gemini-1.5-pro', 'gemini-2.0-pro', 'gemini-2.5-pro'];
-      if (deprecated.includes(model)) {
-        merged.automationSettings.geminiModel = 'gemini-3.5-flash';
+      const deprecated = ['gemini-1.5-flash', 'gemini-pro', 'gemini-2.0-flash'];
+      const deprecatedPro = ['gemini-1.5-pro', 'gemini-2.0-pro'];
+      if (!model || model === 'gemini-3.5-flash' || deprecated.includes(model)) {
+        merged.automationSettings.geminiModel = 'gemini-2.5-flash';
       } else if (deprecatedPro.includes(model)) {
         merged.automationSettings.geminiModel = 'gemini-3.1-pro-preview';
       }
@@ -301,17 +301,32 @@ class LocalDB {
     return [...this.load().opportunities].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
   }
 
-  public addOpportunity(op: Omit<Opportunity, 'status'>): Opportunity {
+  public addOpportunity(op: Opportunity): Opportunity {
     const data = this.load();
-    // Prevent duplicate scrape entry
-    const existingIndex = data.opportunities.findIndex(o => o.id === op.id || o.link === op.link);
+    // Prevent duplicate scrape entry based on ID, original URL, canonical URL, or matching same-project metadata (same title, category, description prefix, and publisher)
+    const existingIndex = data.opportunities.findIndex(o => 
+      o.id === op.id || 
+      o.link === op.link ||
+      (op.canonicalUrl && o.canonicalUrl === op.canonicalUrl) ||
+      (op.canonicalUrl && o.link === op.canonicalUrl) ||
+      (o.canonicalUrl && o.canonicalUrl === op.link) ||
+      (
+        o.platform === op.platform &&
+        o.title.trim().toLowerCase() === op.title.trim().toLowerCase() &&
+        o.category.trim().toLowerCase() === op.category.trim().toLowerCase() &&
+        o.clientName.trim().toLowerCase() === op.clientName.trim().toLowerCase() &&
+        o.description.trim().toLowerCase().substring(0, 200) === op.description.trim().toLowerCase().substring(0, 200)
+      )
+    );
     if (existingIndex !== -1) {
-      // Return existing without overwrite, unless update requested
+      // If we got a new link for the same project, let's keep the existing, but log the duplicate identification
       return data.opportunities[existingIndex];
     }
     const freshOp: Opportunity = {
       ...op,
-      status: 'new'
+      status: op.status || 'new',
+      validationStatus: op.validationStatus || 'VALID',
+      lastValidatedAt: op.lastValidatedAt || new Date().toISOString()
     };
     data.opportunities.push(freshOp);
     this.save(data);

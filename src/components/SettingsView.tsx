@@ -18,7 +18,14 @@ import {
   LogOut,
   Sliders,
   Sparkles,
-  Trash2
+  Trash2,
+  Bug,
+  Play,
+  Check,
+  XCircle,
+  Globe,
+  ExternalLink,
+  ShieldAlert
 } from 'lucide-react';
 import { TelegramSettings, AutomationSettings, SystemLog } from '../types.js';
 
@@ -34,6 +41,12 @@ export default function SettingsView({ onShowToast, onLogout }: SettingsViewProp
   const [testingTg, setTestingTg] = useState(false);
   const [dispatchingBriefing, setDispatchingBriefing] = useState(false);
   const [clearingLogs, setClearingLogs] = useState(false);
+
+  // URL link debugging states
+  const [debugUrl, setDebugUrl] = useState('');
+  const [debugging, setDebugging] = useState(false);
+  const [debugSteps, setDebugSteps] = useState<{ name: string; status: 'success' | 'failed' | 'running' | 'pending'; message: string; data?: any }[]>([]);
+  const [debugResult, setDebugResult] = useState<any>(null);
   
   const fetchSettingsAndLogs = async () => {
     try {
@@ -154,6 +167,78 @@ export default function SettingsView({ onShowToast, onLogout }: SettingsViewProp
       onShowToast('Reset logs call failed.', 'error');
     } finally {
       setClearingLogs(false);
+    }
+  };
+
+  const handleDebugUrl = async () => {
+    if (!debugUrl) {
+      onShowToast('Please provide a freelance project URL to perform diagnostic steps.', 'error');
+      return;
+    }
+    setDebugging(true);
+    setDebugResult(null);
+    setDebugSteps([
+      { name: 'Detect Platform Domain', status: 'running', message: 'Analyzing domain structure...' },
+      { name: 'URL Routing Pattern Check', status: 'pending', message: 'Awaiting platform resolution...' },
+      { name: 'Active Browsing Session Check (Playwright)', status: 'pending', message: 'Awaiting routing verification...' },
+      { name: 'Metadata & Text Content Extraction Check', status: 'pending', message: 'Awaiting accessibility report...' },
+      { name: 'Telegram Safe-Format Formatting Check', status: 'pending', message: 'Awaiting metadata capture...' }
+    ]);
+
+    try {
+      const res = await fetch('/api/opportunities/debug-url', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: debugUrl })
+      });
+
+      const body = await res.json();
+      if (body.steps) {
+        // Overlay completed steps from server
+        const updatedSteps = body.steps.map((srvStep: any) => ({
+          name: srvStep.name,
+          status: srvStep.status as 'success' | 'failed' | 'running' | 'pending',
+          message: srvStep.message,
+          data: srvStep.data
+        }));
+
+        // Pad any omitted steps as failed/pending
+        const stepNames = [
+          'Detect Platform Domain',
+          'URL Routing Pattern Check',
+          'Active Browsing Session Check (Playwright)',
+          'Metadata & Text Content Extraction Check',
+          'Telegram Safe-Format Formatting Check'
+        ];
+
+        const paddedSteps = [...updatedSteps];
+        for (const name of stepNames) {
+          if (!paddedSteps.some(s => s.name === name)) {
+            paddedSteps.push({
+              name,
+              status: 'pending',
+              message: 'Skipped due to upstream failure.'
+            });
+          }
+        }
+
+        setDebugSteps(paddedSteps);
+
+        if (body.success) {
+          setDebugResult(body.opportunity);
+          onShowToast('URL diagnostics completed successfully. View metrics below.', 'success');
+        } else {
+          onShowToast('URL Diagnostics identified a validation block.', 'error');
+        }
+      } else {
+        onShowToast(body.error || 'Server returned empty diagnostic step list.', 'error');
+        setDebugSteps(prev => prev.map(s => s.status === 'running' ? { ...s, status: 'failed', message: body.error || 'Unspecified response' } : s));
+      }
+    } catch (e: any) {
+      onShowToast(`Failed to establish session validation socket: ${e.message}`, 'error');
+      setDebugSteps(prev => prev.map(s => s.status === 'running' ? { ...s, status: 'failed', message: e.message } : s));
+    } finally {
+      setDebugging(false);
     }
   };
 
@@ -397,11 +482,12 @@ export default function SettingsView({ onShowToast, onLogout }: SettingsViewProp
                 <select
                   id="settings-auto-model"
                   className="w-full bg-[#07080d] border border-[#1e2235] text-[#b8c2ec] rounded p-[7px] text-xs outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer"
-                  value={autoSettings.geminiModel || 'gemini-3.5-flash'}
+                  value={autoSettings.geminiModel || 'gemini-2.5-flash'}
                   onChange={(e) => handleSaveAutomation({ geminiModel: e.target.value })}
                 >
-                  <option value="gemini-3.5-flash">Gemini 3.5 Flash (Recommended)</option>
-                  <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro (Preview)</option>
+                  <option value="gemini-2.5-flash">Gemini 2.5 Flash (Default - Cost Saving)</option>
+                  <option value="gemini-3.5-flash">Gemini 3.5 Flash (Standard - Faster)</option>
+                  <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro (Preview - Higher Cost)</option>
                 </select>
               </div>
             </div>
@@ -456,6 +542,160 @@ export default function SettingsView({ onShowToast, onLogout }: SettingsViewProp
         </div>
 
       </div>
+
+      {/* 5. LIVE URL VALIDATION DIAGNOSTIC TERMINAL */}
+      <div className="bg-[#0b0d16]/75 border border-[#1e2235] rounded-lg p-6 space-y-6 backdrop-blur-sm">
+        <div className="border-b border-[#1e2235]/45 pb-3">
+          <h3 className="text-xs font-bold text-slate-200 uppercase tracking-widest flex items-center gap-2 font-mono">
+            <Bug size={16} className="text-amber-400" />
+            Active Opportunity Link Debugger & Tracer
+          </h3>
+          <p className="text-[10px] text-slate-400 font-mono uppercase tracking-wide mt-1">
+            Is a specific Khamsat, Mostaql or Fiverr link failing to scraper/alert correctly? Paste it below to run step-by-step connection, session-wall, DOM extraction, and formatting diagnostic tests.
+          </p>
+        </div>
+
+        <div className="flex flex-col sm:flex-row gap-3 font-mono">
+          <input
+            id="debug-url-input"
+            type="text"
+            className="flex-1 bg-[#07080d] border border-[#1e2235] text-slate-200 rounded p-3 text-xs placeholder-slate-550 min-w-0 outline-none focus:ring-1 focus:ring-blue-500"
+            placeholder="Paste raw target platform URL (e.g. https://mostaql.com/project/1234567-build-saas)..."
+            value={debugUrl}
+            onChange={(e) => setDebugUrl(e.target.value)}
+          />
+          <button
+            id="debug-url-btn"
+            onClick={handleDebugUrl}
+            disabled={debugging}
+            className="flex items-center justify-center gap-2 px-6 py-3 bg-amber-500/10 hover:bg-amber-500 hover:text-black text-amber-300 font-bold uppercase tracking-widest text-[10px] border border-amber-500/25 rounded cursor-pointer transition disabled:opacity-50 shrink-0"
+          >
+            {debugging ? (
+              <>
+                <RefreshCw size={12} className="animate-spin" />
+                Validating Link...
+              </>
+            ) : (
+              <>
+                <Play size={12} />
+                Examine Link
+              </>
+            )}
+          </button>
+        </div>
+
+        {/* Steps stepper and indicators */}
+        {debugSteps.length > 0 && (
+          <div className="space-y-4 border-t border-[#1e2235]/45 pt-5 font-mono">
+            <h4 className="text-[10.5px] font-bold text-slate-400 uppercase tracking-widest">Diagnostic Step traces:</h4>
+            <div className="space-y-3">
+              {debugSteps.map((step, idx) => {
+                let statusColor = 'text-slate-500 border-[#1e2235]';
+                let Icon = () => <div className="h-2 w-2 rounded-full bg-slate-600 mt-1" />;
+
+                if (step.status === 'running') {
+                  statusColor = 'text-blue-400 border-blue-500 bg-blue-500/5 font-bold';
+                  Icon = () => <RefreshCw size={12} className="animate-spin text-blue-400" />;
+                } else if (step.status === 'success') {
+                  statusColor = 'text-emerald-400 border-emerald-950/40 bg-emerald-950/5';
+                  Icon = () => <CheckCircle size={14} className="text-emerald-400 shrink-0" />;
+                } else if (step.status === 'failed') {
+                  statusColor = 'text-rose-400 border-rose-955/20 bg-rose-955/5 font-bold';
+                  Icon = () => <XCircle size={14} className="text-rose-400 shrink-0" />;
+                }
+
+                return (
+                  <div key={idx} className={`p-3 border rounded-md flex items-start gap-3 transition ${statusColor}`}>
+                    <div className="shrink-0 mt-0.5">
+                      <Icon />
+                    </div>
+                    <div className="flex-1 space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] font-extrabold uppercase tracking-wide">
+                          Step {idx + 1}: {step.name}
+                        </span>
+                        <span className="text-[9px] uppercase font-semibold opacity-75">
+                          ({step.status})
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-slate-300 leading-relaxed font-sans">{step.message}</p>
+                      
+                      {/* Step inner data output logic */}
+                      {step.data && (
+                        <div className="mt-2 p-2 bg-slate-950/50 border border-[#1e2235]/65 rounded text-[9px] text-slate-450 overflow-x-auto space-y-1 select-text">
+                          <span className="font-extrabold text-[#7e8db4] uppercase block tracking-wider">Payload diagnostic trace:</span>
+                          <pre className="mt-1 leading-normal font-mono">{JSON.stringify(step.data, null, 2)}</pre>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Extracted Opportunity Details Block */}
+        {debugResult && (
+          <div className="bg-[#0a0c14] border border-[#1e2235] rounded-lg p-5 font-mono space-y-4 animate-fade-in">
+            <h4 className="text-[11px] font-bold text-emerald-400 uppercase tracking-widest flex items-center gap-1.5 pb-2.5 border-b border-[#1e2235]/45">
+              <CheckCircle size={14} className="text-emerald-400" />
+              Extracted Opportunity Schemas (Valid and Parsing)
+            </h4>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-[10px]">
+              <div className="space-y-1">
+                <span className="text-slate-500 uppercase tracking-wider block">Target Title</span>
+                <span className="text-slate-200 lg:text-xs font-bold block">{debugResult.title}</span>
+              </div>
+              <div className="space-y-1">
+                <span className="text-slate-500 uppercase tracking-wider block">Freelancer Platform</span>
+                <span className="text-blue-400 font-extrabold block uppercase tracking-widest">{debugResult.platform}</span>
+              </div>
+              <div className="space-y-1">
+                <span className="text-slate-500 uppercase tracking-wider block">Extracted Job Budget / Estimate</span>
+                <span className="text-emerald-400 font-bold block">{debugResult.budget || 'Unspecified'}</span>
+              </div>
+              <div className="space-y-1">
+                <span className="text-slate-500 uppercase tracking-wider block">Client Brand Name</span>
+                <span className="text-amber-400 font-bold block">{debugResult.clientName || 'Anonymous Client'}</span>
+              </div>
+              <div className="space-y-1">
+                <span className="text-slate-500 uppercase tracking-wider block">Target Category</span>
+                <span className="text-slate-300 block">{debugResult.category || 'N/A'}</span>
+              </div>
+              <div className="space-y-1">
+                <span className="text-slate-500 uppercase tracking-wider block">Detected Source Language</span>
+                <span className="text-indigo-400 block uppercase tracking-widest">{debugResult.language || 'Arabic (ar)'}</span>
+              </div>
+            </div>
+
+            <div className="space-y-1.5 pt-3 border-t border-[#1e2235]/25 text-[10px]">
+              <span className="text-slate-500 uppercase tracking-wider block">Job Post Description Snippet</span>
+              <p className="text-slate-300 font-sans leading-relaxed p-3 bg-black/45 border border-[#1e2235]/45 rounded text-xs select-text overflow-y-auto max-h-[140px]">
+                {debugResult.description}
+              </p>
+            </div>
+
+            <div className="pt-2 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-t border-[#1e2235]/25 bg-[#07080c]/50 p-3 rounded-md">
+              <span className="text-[10px] text-slate-400 flex items-center gap-1.5 truncate max-w-full">
+                <Globe size={12} className="text-slate-500 shrink-0" />
+                Ref URL: {debugResult.link}
+              </span>
+              <a
+                href={debugResult.link}
+                target="_blank"
+                rel="noreferrer"
+                className="flex items-center gap-1 text-[10px] text-blue-400 hover:text-blue-300 uppercase tracking-wider font-extrabold transition cursor-pointer shrink-0"
+              >
+                Launch Link Externally
+                <ExternalLink size={11} />
+              </a>
+            </div>
+          </div>
+        )}
+      </div>
+
     </div>
   );
 }

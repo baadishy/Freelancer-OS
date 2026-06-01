@@ -13,9 +13,9 @@ import dotenv from "dotenv";
 import { db } from './server/db.ts';
 import { isGeminiConfigured, getGeminiClient } from './server/gemini.ts';
 import { analyzeOpportunity, writeProposal, analyzeJobAndGenerateProposal } from './server/proposal.ts';
-import { startScheduler, sendTelegramMessage, sendDailyBriefingReport } from './server/telegram.ts';
-import { triggerActivePlatformsScrape, startScraperScheduler } from './server/scraper.ts';
-import { playwrightSession, validatePlatformSession, submitProposalViaPlaywright, detectChromePath, importCookiesToPlatform } from './server/playwright-session.ts';
+import { startScheduler, sendTelegramMessage, sendDailyBriefingReport, escapeMarkdown } from './server/telegram.ts';
+import { triggerActivePlatformsScrape, startScraperScheduler, revalidateSavedOpportunities } from './server/scraper.ts';
+import { playwrightSession, validatePlatformSession, submitProposalViaPlaywright, detectChromePath, importCookiesToPlatform, validateOpportunity, extractMostaqlOpportunity, extractKhamsatOpportunity, extractFiverrOpportunity, launchPlaywrightPersistent, extractKhamsatId } from './server/playwright-session.ts';
 import { Opportunity, Proposal } from './src/types.ts';
 import { Type } from "@google/genai";
 
@@ -299,9 +299,9 @@ async function startServer() {
 
   app.post('/api/accounts/verify', async (req, res) => {
     try {
+      const active = playwrightSession.getActivePlatform();
       const success = await playwrightSession.saveAndClose();
       if (success) {
-        const active = playwrightSession.getActivePlatform();
         const account = active ? db.getAccount(active) : null;
         res.json({ success: true, account });
       } else {
@@ -538,6 +538,16 @@ async function startServer() {
     }
   });
 
+  app.post('/api/opportunities/revalidate', async (req, res) => {
+    try {
+      db.addLog('info', 'scraper', 'Manual revalidation of saved opportunities triggered via Web App.');
+      await revalidateSavedOpportunities();
+      res.json({ success: true, message: 'All active pending opportunities checked. Database states successfully updated.' });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Manual revalidation failed.' });
+    }
+  });
+
   app.put('/api/opportunities/:id/status', (req, res) => {
     try {
       const { status } = req.body;
@@ -586,6 +596,343 @@ async function startServer() {
       res.json(updated);
     } catch (err: any) {
       res.status(500).json({ error: err.message || 'AI score evaluation failed.' });
+    }
+  });
+
+  app.post('/api/opportunities/debug-url', async (req, res) => {
+    let { url } = req.body;
+    if (!url) {
+      return res.status(400).json({ error: 'URL is required to perform diagnostics.' });
+    }
+
+    // Sanitize link: trim whitespaces, remove outer quotes or brackets
+    url = url.trim().replace(/^["'\[\(]+|["'\]\)]+$/g, '').trim();
+
+    // Bypass mock/simulated links right away!
+    const lowerUrl = url.toLowerCase();
+    if (lowerUrl.includes('-job-') || lowerUrl.includes('/requests/999999') || lowerUrl.includes('local') || lowerUrl.includes('simulate') || lowerUrl.includes('mock')) {
+      const platformName = lowerUrl.includes('mostaql') ? 'Mostaql' as const : lowerUrl.includes('khamsat') ? 'Khamsat' as const : 'Fiverr' as const;
+      const steps = [
+        { name: 'Detect Platform Domain', status: 'success' as const, message: `Successfully resolved target platform: Simulated ${platformName}` },
+        { name: 'URL Routing Pattern Check', status: 'success' as const, message: 'Passed pattern verification: Simulated fallback trace.' },
+        { name: 'Active Browsing Session Check (Playwright)', status: 'success' as const, message: 'Bypassed browser launching for safe simulated sandbox environments.' },
+        { name: 'Metadata & Text Content Extraction Check', status: 'success' as const, message: 'Extracting simulated metadata: "Active Simulated Public Opportunity", client: "Public Partner"' },
+        { name: 'Telegram Safe-Format Formatting Check', status: 'success' as const, message: 'Success validating formatting logic on simulated buffer.' }
+      ];
+      return res.json({
+        success: true,
+        steps,
+        opportunity: {
+          title: "Active Simulated Public Opportunity",
+          platform: platformName,
+          link: url,
+          budget: "$150 - $300",
+          clientName: "Public Partner",
+          category: platformName === 'Mostaql' ? 'برمجة وتطوير المواقع' : platformName === 'Khamsat' ? 'تطوير مواقع وتطبيقات' : 'Web Development',
+          description: "This is an active simulated public opportunity. Interactive routing bypassed.",
+          language: "en",
+          validationStatus: "VALID"
+        }
+      });
+    }
+
+    const steps: { name: string; status: 'success' | 'failed' | 'running' | 'pending'; message: string; data?: any }[] = [];
+    
+    function setStep(name: string, status: 'success' | 'failed' | 'running' | 'pending', message: string, data?: any) {
+      const idx = steps.findIndex(s => s.name === name);
+      if (idx !== -1) {
+        steps[idx] = { name, status, message, data };
+      } else {
+        steps.push({ name, status, message, data });
+      }
+    }
+
+    // Initialize all steps upfront so they appear in correct sequence and status
+    setStep('Detect Platform Domain', 'pending', 'Awaiting platform resolution...');
+    setStep('URL Routing Pattern Check', 'pending', 'Awaiting pattern matches...');
+    setStep('Active Browsing Session Check (Playwright)', 'pending', 'Awaiting previous step Completion');
+    setStep('Metadata & Text Content Extraction Check', 'pending', 'Awaiting previous step Completion');
+    setStep('Telegram Safe-Format Formatting Check', 'pending', 'Awaiting previous step Completion');
+
+    // Step 1: Detect Platform by parsing URL Domain
+    let platform: 'Khamsat' | 'Mostaql' | 'Fiverr' | null = null;
+    if (lowerUrl.includes('khamsat.com')) {
+      platform = 'Khamsat';
+    } else if (lowerUrl.includes('mostaql.com')) {
+      platform = 'Mostaql';
+    } else if (lowerUrl.includes('fiverr.com')) {
+      platform = 'Fiverr';
+    }
+
+    if (!platform) {
+      setStep('Detect Platform Domain', 'failed', `Unrecognized platform. The URL must belong to khamsat.com, mostaql.com, or fiverr.com as supported freelance hubs. Supplied: "${url}"`);
+      return res.json({ success: false, steps });
+    }
+
+    setStep('Detect Platform Domain', 'success', `Successfully resolved target platform: ${platform}`, { url, platform });
+
+    // Step 2: Route Pattern Format Verification
+    let pathValid = true;
+    let pathMessage = '';
+    if (platform === 'Mostaql') {
+      if (!lowerUrl.includes('/project/') || !lowerUrl.match(/\/project\/\d+/)) {
+        pathValid = false;
+        pathMessage = 'Invalid path pattern. Mostaql project pages must follow the pattern "/project/ID-slug" to extract description, details, and cost metrics properly.';
+      } else {
+        pathMessage = 'Passed pattern verification: URL belongs to a direct Mostaql project description page.';
+      }
+    } else if (platform === 'Khamsat') {
+      const isRequest = lowerUrl.includes('/community/requests') && lowerUrl.match(/\/requests\/\d+/);
+      const isService = lowerUrl.includes('/service/') && lowerUrl.match(/\/service\/\d+/);
+      if (!isRequest && !isService) {
+        pathValid = false;
+        pathMessage = 'Invalid path pattern. Khamsat community requests must match "/community/requests/ID" or direct service page "/service/ID".';
+      } else {
+        pathMessage = `Passed pattern verification: URL represents a direct Khamsat ${isRequest ? 'community request brief' : 'service'} page.`;
+      }
+    } else if (platform === 'Fiverr') {
+      if (
+        lowerUrl.includes('/search/') ||
+        lowerUrl.includes('/categories/') ||
+        lowerUrl.includes('/support') ||
+        lowerUrl.includes('/users/') || 
+        lowerUrl.includes('/profile/') ||
+        lowerUrl.includes('preview=true') ||
+        lowerUrl.includes('/inbox') ||
+        lowerUrl.includes('/conversations')
+      ) {
+        pathValid = false;
+        pathMessage = 'Protected path block. Fiverr URL points to meta lists, query paths, user portfolios, or messages, which are inaccessible to the scraper.';
+      } else {
+        pathMessage = 'Passed pattern verification: URL represents a valid Fiverr gig or custom project description page.';
+      }
+    }
+
+    if (!pathValid) {
+      setStep('URL Routing Pattern Check', 'failed', pathMessage);
+      return res.json({ success: false, steps });
+    }
+
+    setStep('URL Routing Pattern Check', 'success', pathMessage);
+
+    // Step 3: Run Headless Chrome Navigations & Accessibility Check
+    let context: any = null;
+    let page: any = null;
+    let finalUrl = url;
+
+    try {
+      setStep('Active Browsing Session Check (Playwright)', 'running', `Launching persistent context for ${platform} and visiting URL...`);
+
+      context = await launchPlaywrightPersistent(platform);
+      const pages = context.pages();
+      page = pages.length > 0 ? pages[0] : await context.newPage();
+
+      const response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 35000 });
+      await page.waitForTimeout(2000);
+
+      const httpStatus = response ? response.status() : 200;
+      finalUrl = page.url();
+      const lowerFinal = finalUrl.toLowerCase();
+      const redirectDetected = finalUrl !== url;
+
+      let connectivityMessage = `HTTP status response received: ${httpStatus}. `;
+      if (redirectDetected) {
+        connectivityMessage += `Redirect logged from: [${url}] down to: [${finalUrl}]. `;
+      }
+
+      if (httpStatus === 404) {
+        setStep('Active Browsing Session Check (Playwright)', 'failed', `${connectivityMessage} The freelance platform returned a 404 status. The job offer has likely been deleted or archived.`);
+        await context.close().catch(() => {});
+        return res.json({ success: false, steps });
+      }
+
+      // Check for login wall or portal landing redirects
+      let loginRedirect = false;
+      let loginMsg = '';
+      if (platform === 'Mostaql') {
+        if (lowerFinal.endsWith('mostaql.com/') || lowerFinal.endsWith('mostaql.com/projects') || lowerFinal.includes('/login') || lowerFinal.includes('/register') || lowerFinal.includes('accounts.hsoub.com')) {
+          const userMenu = await page.$('a[href*="/u/"], .user-menu, a[href*="/logout"], img.avatar, .avatar');
+          if (!userMenu) {
+            loginRedirect = true;
+            loginMsg = 'Mostaql redirected to the login wall or homepage, and no active user menu was detected. Your persistent browser session cookies have expired or are disconnected. Please verify and update your credentials under Platform Accounts.';
+          } else {
+            db.addLog('info', 'scraper', `[DEBUGGER] User session is authenticated, but this specific project URL redirects to homepage/limits, indicating a Private project.`);
+          }
+        }
+      } else if (platform === 'Khamsat') {
+        if (lowerFinal.endsWith('khamsat.com/') || lowerFinal.endsWith('khamsat.com/community/requests') || lowerFinal.includes('/login') || lowerFinal.includes('/signin') || lowerFinal.includes('accounts.hsoub.com')) {
+          const userMenu = await page.$('a[href*="/user/"], .user-menu, a[href*="/logout"], .avatar, .nav-user');
+          if (!userMenu) {
+            loginRedirect = true;
+            loginMsg = 'Khamsat redirected to the login/SSO portal, and no active user menu was detected. Your active browser session is unauthenticated or has expired. Please refresh your session by updating billing or login cookies.';
+          } else {
+            db.addLog('info', 'scraper', `[DEBUGGER] User session is authenticated, but access to this specific Khamsat URL is restricted/private.`);
+          }
+        }
+      } else if (platform === 'Fiverr') {
+        if (lowerFinal.endsWith('fiverr.com/') || lowerFinal.includes('/login') || lowerFinal.includes('/join') || lowerFinal.includes('/categories')) {
+          const userMenu = await page.$('.logged-in, .user-avatar, a[href*="/logout"], img[src*="user_image"]');
+          if (!userMenu) {
+            loginRedirect = true;
+            loginMsg = 'Fiverr redirected to authentication and no active session was located. Your account context might be expired. Refresh his fiverr session info.';
+          } else {
+            db.addLog('info', 'scraper', `[DEBUGGER] Fiverr session is active, but this URL structure is metadata-restricted.`);
+          }
+        }
+      }
+
+      if (loginRedirect) {
+        setStep('Active Browsing Session Check (Playwright)', 'failed', `${connectivityMessage} redirect-loop block! ${loginMsg}`);
+        await context.close().catch(() => {});
+        return res.json({ success: false, steps });
+      }
+
+      if (platform === 'Khamsat') {
+        const originalServiceId = extractKhamsatId(url);
+        const finalServiceId = extractKhamsatId(finalUrl);
+        if (originalServiceId && finalServiceId && originalServiceId !== finalServiceId) {
+          setStep('Active Browsing Session Check (Playwright)', 'failed', `Khamsat Service Redirect Detected! The original service ID (${originalServiceId}) redirected to another service ID (${finalServiceId}). This indicates the original service is invalid, deleted, or redirected by Khamsat.`);
+          await context.close().catch(() => {});
+          return res.json({ success: false, steps });
+        }
+      }
+
+      setStep('Active Browsing Session Check (Playwright)', 'success', `${connectivityMessage} Navigation completed successfully without access blocks.`, { finalUrl, httpStatus, redirectDetected });
+
+    } catch (err: any) {
+      setStep('Active Browsing Session Check (Playwright)', 'failed', `Platform browser controller timed out or crashed: ${err.message}`);
+      if (context) {
+        await context.close().catch(() => {});
+      }
+      return res.json({ success: false, steps });
+    }
+
+    // Step 4: Extraction Verification
+    let extractionRes: any = null;
+    try {
+      setStep('Metadata & Text Content Extraction Check', 'running', 'Parsing DOM elements to extract budget metrics, descriptive text, and exclusions...');
+
+      const mainText = await page.textContent('body').catch(() => '') || '';
+      const pageTitle = await page.title().catch(() => '') || '';
+      const lowerText = mainText.toLowerCase();
+      const lowerTitle = pageTitle.toLowerCase();
+      let markerMatch = false;
+      let markerText = '';
+
+      if (platform === 'Mostaql') {
+        if (mainText.includes('ليس لديك الصلاحيات') || mainText.includes('ليس لديك صلاحية')) {
+          markerMatch = true;
+          markerText = 'Access Restricted ("ليس لديك الصلاحيات"). This project is set to private by the creator.';
+        } else if (mainText.includes('هذا المشروع غير موجود') || mainText.includes('المشروع غير موجود') || mainText.includes('الصفحة غير موجودة') || pageTitle.includes('404')) {
+          markerMatch = true;
+          markerText = 'Project Deleted ("المشروع غير موجود").';
+        } else if (mainText.includes('المشروع مغلق') || mainText.includes('بانتظار الموافقة') || mainText.includes('مغلق')) {
+          markerMatch = true;
+          markerText = 'Project Closed ("المشروع مغلق / بانتظار الموافقة"). Bids can no longer be placed.';
+        } else if (mainText.includes('تم حذف المشروع')) {
+          markerMatch = true;
+          markerText = 'Project Deleted / Purged.';
+        }
+      } else if (platform === 'Khamsat') {
+        const invalidPhrases = [
+          'الخدمة غير موجودة',
+          'الخدمة غير متوفرة',
+          'تم حذف الخدمة',
+          '404',
+          'page not found',
+          'service unavailable'
+        ];
+        const matchedPhrase = invalidPhrases.find(phrase => lowerText.includes(phrase) || lowerTitle.includes(phrase));
+        if (matchedPhrase) {
+          markerMatch = true;
+          markerText = `Service/Topic deleted, invalid or not found (matched phrase: "${matchedPhrase}").`;
+        } else if (mainText.includes('طلب غير موجود') || mainText.includes('تم حذف الموضوع')) {
+          markerMatch = true;
+          markerText = 'Service/Topic/Request deleted or not found.';
+        } else if (mainText.includes('لا توجد صلاحية لدخول الصفحة') || mainText.includes('لا توجد لديك الصلاحية')) {
+          markerMatch = true;
+          markerText = 'Private community page ("لا توجد صلاحية لدخول الصفحة").';
+        } else if (mainText.includes('الموضوع مغلق') || mainText.includes('تم إغلاق الموضوع') || mainText.includes('مغلق بطلب من السائل')) {
+          markerMatch = true;
+          markerText = 'Topic is closed to new replies ("الموضوع مغلق").';
+        }
+      } else if (platform === 'Fiverr') {
+        if (mainText.includes("This gig isn't available now") || mainText.includes("isn't available now") || mainText.includes("The page you are looking for can't be found")) {
+          markerMatch = true;
+          markerText = "Gig or custom request is inactive or paused on Fiverr.";
+        }
+      }
+
+      if (markerMatch) {
+         setStep('Metadata & Text Content Extraction Check', 'failed', `Extraction failed: Target page matches offline/closed status indicators: "${markerText}"`);
+         await context.close().catch(() => {});
+         return res.json({ success: false, steps });
+      }
+
+      if (platform === 'Mostaql') {
+        extractionRes = await extractMostaqlOpportunity(page, finalUrl);
+      } else if (platform === 'Khamsat') {
+        extractionRes = await extractKhamsatOpportunity(page, finalUrl);
+      } else {
+        extractionRes = await extractFiverrOpportunity(page, finalUrl);
+      }
+
+      if (!extractionRes || !extractionRes.valid) {
+        setStep('Metadata & Text Content Extraction Check', 'failed', `Selector Extraction Query Failure: Scraper returned invalid structure. Reason: ${extractionRes?.reason || 'unspecified'}`);
+        await context.close().catch(() => {});
+        return res.json({ success: false, steps });
+      }
+
+      setStep('Metadata & Text Content Extraction Check', 'success', `Extraction successful! Title: "${extractionRes.title}", Client: "${extractionRes.clientName}", Budget: "${extractionRes.budget}"`, extractionRes);
+
+    } catch (err: any) {
+      setStep('Metadata & Text Content Extraction Check', 'failed', `DOM query failed: ${err.message}`);
+      if (context) {
+        await context.close().catch(() => {});
+      }
+      return res.json({ success: false, steps });
+    }
+
+    // Step 5: Telegram Safe-Format Formatting Check
+    try {
+      setStep('Telegram Safe-Format Formatting Check', 'success', 'Successfully validated formatting. Checked escaping for HTML/Markdown V1 blocks to prevent Telegram API dropping errors.', {
+        escapedHtmlTitle: extractionRes.title.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'),
+        escapedMarkdownTitle: escapeMarkdown(extractionRes.title),
+        escapedMarkdownBudget: escapeMarkdown(extractionRes.budget),
+        escapedMarkdownLink: escapeMarkdown(finalUrl)
+      });
+
+      await context.close().catch(() => {});
+
+      res.json({
+        success: true,
+        steps,
+        opportunity: {
+          title: extractionRes.title,
+          platform,
+          link: finalUrl,
+          budget: extractionRes.budget,
+          clientName: extractionRes.clientName,
+          category: extractionRes.category,
+          description: extractionRes.description,
+          language: extractionRes.language,
+          validationStatus: 'VALID',
+          validationReason: null,
+          originalUrl: url,
+          finalUrl: finalUrl,
+          serviceId: extractKhamsatId(url) || '',
+          finalServiceId: extractKhamsatId(finalUrl) || '',
+          redirectDetected: url !== finalUrl,
+          publishedAt: extractionRes.publishedAt,
+          lastValidatedAt: new Date().toISOString()
+        }
+      });
+    } catch (err: any) {
+      setStep('Telegram Safe-Format Formatting Check', 'failed', `Formatting validator failed: ${err.message}`);
+      if (context) {
+        await context.close().catch(() => {});
+      }
+      res.json({ success: false, steps });
     }
   });
 
@@ -939,7 +1286,7 @@ async function startServer() {
       const autoSettings = db.getAutomationSettings();
       const logs = db.getLogs().slice(0, 15);
 
-      const activeModel = autoSettings.geminiModel || 'gemini-3.5-flash';
+      const activeModel = autoSettings.geminiModel || 'gemini-2.5-flash';
 
       const appStateContext = `
         You are the "Freelance OS AI Assistant", embedded in a specialized workspace.

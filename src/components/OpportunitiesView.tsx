@@ -20,12 +20,13 @@ import {
   ThumbsUp, 
   XCircle, 
   HelpCircle,
-  Trash2
+  Trash2,
+  Bug
 } from 'lucide-react';
 import { Opportunity } from '../types.js';
 
 interface OpportunitiesViewProps {
-  onNavigate: (view: string, id?: string) => void;
+  onNavigate: (view: string, id?: string, extraUrl?: string) => void;
   onShowToast: (msg: string, type: 'success' | 'info' | 'error') => void;
   initialSelectedId?: string | null;
   onClearSelectedId?: () => void;
@@ -45,6 +46,26 @@ export default function OpportunitiesView({
   const [analyzingId, setAnalyzingId] = useState<string | null>(null);
   const [writingId, setWritingId] = useState<string | null>(null);
   const [activeFilter, setActiveFilter] = useState('all');
+  const [revalidating, setRevalidating] = useState(false);
+
+  const handleRevalidateAll = async () => {
+    setRevalidating(true);
+    onShowToast('Checking states and urls for active pending opportunity channels...', 'info');
+    try {
+      const response = await fetch('/api/opportunities/revalidate', { method: 'POST' });
+      const data = await response.json();
+      if (response.ok) {
+        onShowToast(data.message || 'Opportunities validation cycle completed successfully.', 'success');
+        fetchOpportunities();
+      } else {
+        onShowToast(data.error || 'Failed to complete validation checks.', 'error');
+      }
+    } catch (_) {
+      onShowToast('Network exception running live revalidation checks.', 'error');
+    } finally {
+      setRevalidating(false);
+    }
+  };
 
   const getCleanJobLink = (job: any) => {
     return job.link || '#';
@@ -351,9 +372,21 @@ export default function OpportunitiesView({
             </div>
           </div>
 
-          <span className="font-mono text-[11px] text-slate-400 uppercase tracking-wider">
-            Filtered count: <strong className="text-slate-200">{displayedJobs.length}</strong> opportunities
-          </span>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handleRevalidateAll}
+              disabled={loading || revalidating}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-[#121522] hover:bg-[#1a1e30] border border-[#1e2235] hover:border-blue-500/30 text-blue-300 font-mono text-[10px] font-bold uppercase tracking-wider rounded cursor-pointer disabled:opacity-50 transition"
+              id="revalidate-all-channels-btn"
+            >
+              <RefreshCw size={12} className={revalidating ? "animate-spin text-blue-400" : "text-blue-400"} />
+              {revalidating ? 'Revalidating...' : 'Revalidate Channels'}
+            </button>
+
+            <span className="font-mono text-[11px] text-slate-400 uppercase tracking-wider">
+              Filtered count: <strong className="text-slate-200">{displayedJobs.length}</strong> opportunities
+            </span>
+          </div>
         </div>
       </div>
 
@@ -415,11 +448,31 @@ export default function OpportunitiesView({
                     <span className={`inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded uppercase tracking-wider font-extrabold font-mono border ${
                       job.isActive !== false
                         ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
-                        : 'bg-rose-550/15 text-rose-400 border-rose-500/20'
+                        : 'bg-rose-500/15 text-rose-400 border-rose-500/20'
                     }`}>
                       <span className={`w-1.5 h-1.5 rounded-full ${job.isActive !== false ? 'bg-emerald-400 animate-pulse' : 'bg-rose-500'}`} />
                       {job.isActive !== false ? 'Active' : 'Ended'}
                     </span>
+
+                    {/* Validation Health Status Badge */}
+                    {job.validationStatus && (
+                      <span className={`inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded uppercase tracking-wider font-extrabold font-mono border ${
+                        job.validationStatus === 'VALID'
+                          ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                          : 'bg-rose-500/10 text-rose-450 border-rose-500/20'
+                      }`} title={job.validationReason ? `Reason: ${job.validationReason}` : 'Fully active & verified channel URL'}>
+                        <Activity size={10} className={job.validationStatus === 'VALID' ? "text-emerald-400" : "text-rose-400"} />
+                        Health: {job.validationStatus === 'VALID' ? 'Verified' : `Invalid (${job.validationReason || 'Broken'})`}
+                      </span>
+                    )}
+
+                    {/* Canonical URL status indicator */}
+                    {job.canonicalUrl && job.canonicalUrl !== job.link && (
+                      <span className="inline-flex items-center gap-1.5 text-[10px] px-2 py-0.5 rounded bg-[#07080d] border border-[#1e2235] text-slate-400 font-mono" title={`Redirected elegantly to: ${job.canonicalUrl}`}>
+                        <CheckCircle size={10} className="text-blue-400" />
+                        Canonicalized
+                      </span>
+                    )}
                     {job.budget && (
                       <span className="inline-flex items-center gap-1.5 text-[11px] px-2.5 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/25 text-emerald-400 font-mono font-bold">
                         <Coins size={12} className="text-emerald-400" />
@@ -514,6 +567,16 @@ export default function OpportunitiesView({
                     >
                       <Clock size={13} />
                       {job.isActive !== false ? 'Mark Ended' : 'Activate'}
+                    </button>
+
+                    <button
+                      id={`op-${job.id}-debug-link-btn`}
+                      onClick={() => onNavigate('urlDebugger', undefined, job.link)}
+                      className="flex items-center gap-1.5 px-3 py-2 bg-[#0c0d15]/50 hover:bg-amber-950/20 border border-[#1e2235] hover:border-amber-500/30 text-slate-400 hover:text-amber-300 text-[11px] font-bold uppercase tracking-wider rounded transition cursor-pointer"
+                      title="Initiate high-fidelity diagnostics trace on this job invitation URL"
+                    >
+                      <Bug size={13} className="text-amber-500 shrink-0" />
+                      Troubleshoot Link
                     </button>
 
                     <button

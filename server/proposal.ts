@@ -43,6 +43,12 @@ export async function analyzeOpportunity(
   profile: FreelancerProfile,
   op: Opportunity
 ): Promise<MatchAnalysis> {
+  // Enforce AI Integration Rule: Refuse to analyze if validationStatus !== 'VALID'
+  if (op.validationStatus !== 'VALID') {
+    db.addLog('warning', 'gemini', `[AI REFUSED] Refused to analyze opportunity "${op.title}" (${op.id}). validationStatus: ${op.validationStatus || 'unvalidated'}`);
+    throw new Error(`AI Match Analysis Refused: Target opportunity has validation status '${op.validationStatus || 'unvalidated'}'. Only active, validated jobs can be analyzed.`);
+  }
+
   const now = Date.now();
   if (now < globalGeminiCoolDownUntil) {
     const mockScore = calculateHeuristicScore(profile, op);
@@ -65,7 +71,7 @@ export async function analyzeOpportunity(
 
   const ai = getGeminiClient();
   const settings = db.getAutomationSettings();
-  const activeModel = settings.geminiModel || 'gemini-3.5-flash';
+  const activeModel = settings.geminiModel || 'gemini-2.5-flash';
 
   const prompt = `
     Conduct an exhaustive, expert matching analysis comparing this freelance opportunity to the candidate profile.
@@ -228,6 +234,12 @@ export async function writeProposal(
   customTone?: string,
   customLength?: 'short' | 'medium' | 'long'
 ): Promise<string> {
+  // Enforce Proposal Engine Rules: Requires validationStatus = VALID
+  if (op.validationStatus !== 'VALID') {
+    db.addLog('warning', 'automation', `[PROPOSAL REFUSED] Locked proposal generation for invalid opportunity "${op.title}" (${op.id}). validationStatus: ${op.validationStatus || 'unvalidated'}`);
+    throw new Error(`Proposal Generation Refused: Target opportunity has validationStatus '${op.validationStatus || 'unvalidated'}'. Generation only allowed for active, valid items.`);
+  }
+
   const now = Date.now();
   if (now < globalGeminiCoolDownUntil) {
     // High-fidelity offline generator template to conserve requests
@@ -267,7 +279,7 @@ Your Development Partner`;
 
   const ai = getGeminiClient();
   const settings = db.getAutomationSettings();
-  const activeModel = settings.geminiModel || 'gemini-3.5-flash';
+  const activeModel = settings.geminiModel || 'gemini-2.5-flash';
 
   const tone = customTone || profile.proposalTone;
   const length = customLength || profile.proposalLength;
@@ -401,7 +413,7 @@ export async function analyzeJobAndGenerateProposal(input: FreelancerJobInput): 
 
   const ai = getGeminiClient();
   const settings = db.getAutomationSettings();
-  const activeModel = settings.geminiModel || 'gemini-3.5-flash';
+  const activeModel = settings.geminiModel || 'gemini-2.5-flash';
 
   const systemInstruction = `
 You are a highly professional freelance proposal and job compatibility analyzer.

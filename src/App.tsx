@@ -20,7 +20,8 @@ import {
   CheckCircle,
   XCircle,
   Zap,
-  UserCheck
+  UserCheck,
+  Bug
 } from 'lucide-react';
 
 // Sub Views
@@ -32,6 +33,7 @@ import ProfileView from './components/ProfileView.tsx';
 import SettingsView from './components/SettingsView.tsx';
 import AccountsView from './components/AccountsView.tsx';
 import ChatbotWidget from './components/ChatbotWidget.tsx';
+import UrlDebuggerView from './components/UrlDebuggerView.tsx';
 
 interface LocalSessionUser {
   name: string;
@@ -48,14 +50,18 @@ export default function App() {
   const [session, setSession] = useState<{ user: LocalSessionUser; token: string } | null>(null);
   const [currentView, setCurrentView] = useState<string>('dashboard');
   const [selectedOpportunityId, setSelectedOpportunityId] = useState<string | null>(null);
+  const [debugPreFillUrl, setDebugPreFillUrl] = useState<string>('');
   const [loadingSession, setLoadingSession] = useState(true);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
 
-  const handleNavigate = (view: string, id?: string) => {
+  const handleNavigate = (view: string, id?: string, extraUrl?: string) => {
     setCurrentView(view);
     if (id) {
       setSelectedOpportunityId(id);
+    }
+    if (extraUrl) {
+      setDebugPreFillUrl(extraUrl);
     }
   };
 
@@ -228,6 +234,7 @@ export default function App() {
     { view: 'dashboard', label: 'Monitor Terminal', icon: LayoutDashboard },
     { view: 'accounts', label: 'Platform Accounts', icon: UserCheck },
     { view: 'opportunities', label: 'Opportunities Feeds', icon: Search },
+    { view: 'urlDebugger', label: 'Link Debugger', icon: Bug },
     { view: 'proposals', label: 'Proposals Queue', icon: FileText },
     { view: 'profile', label: 'Freelancer Profile', icon: User },
     { view: 'settings', label: 'Orchestration Rules', icon: Settings },
@@ -385,6 +392,14 @@ export default function App() {
                   initialSelectedId={selectedOpportunityId}
                   onClearSelectedId={() => setSelectedOpportunityId(null)}
                   onShowToast={showToastNotification} 
+                />
+              )}
+              {currentView === 'urlDebugger' && (
+                <UrlDebuggerView 
+                  onShowToast={showToastNotification} 
+                  prefillUrl={debugPreFillUrl}
+                  onClearPrefill={() => setDebugPreFillUrl('')}
+                  onNavigate={handleNavigate}
                 />
               )}
               {currentView === 'proposals' && (

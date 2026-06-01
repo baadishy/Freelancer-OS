@@ -7,7 +7,7 @@ import { db } from './db.js';
 import { Opportunity } from '../src/types.js';
 import { analyzeOpportunity, writeProposal } from './proposal.js';
 import { sendJobMatchAlert } from './telegram.js';
-import { scrapePlatformJobsPlaywright, submitProposalViaPlaywright } from './playwright-session.js';
+import { scrapePlatformJobsPlaywright, submitProposalViaPlaywright, validateOpportunity } from './playwright-session.js';
 
 // Stub type since playwright isn't bundled on base packages (to avoid Docker/npm compile size errors)
 // This gives clean code structure if imported
@@ -134,7 +134,15 @@ export async function triggerActivePlatformsScrape(): Promise<number> {
           timestamp: new Date().toISOString(),
           status: 'new',
           publishedAt: 'Just now',
-          isActive: true
+          isActive: true,
+          validationStatus: job.validationStatus,
+          validationReason: job.validationReason,
+          lastValidatedAt: job.lastValidatedAt,
+          originalUrl: job.originalUrl,
+          finalUrl: job.finalUrl,
+          serviceId: job.serviceId,
+          finalServiceId: job.finalServiceId,
+          redirectDetected: job.redirectDetected
         });
       });
     } else {
@@ -146,7 +154,7 @@ export async function triggerActivePlatformsScrape(): Promise<number> {
         const skillMatch = profile.skills[Math.floor(Math.random() * profile.skills.length)] || 'تطوير ويب';
         const cleanSlug = encodeURIComponent(title.toLowerCase().replace(/[^a-z0-9\u0600-\u06FF]+/g, '-'));
         
-        const isEnded = (i === countKhamsat - 1 && countKhamsat > 1);
+        const isEnded = false;
         foundJobs.push({
           id,
           title,
@@ -157,10 +165,10 @@ export async function triggerActivePlatformsScrape(): Promise<number> {
           category: 'تطوير مواقع وتطبيقات',
           description: `مطلوب تنفيذ هذا المشروع بأسرع وقت ممكن. يجب أن يمتلك المستقل خبرة ممتازة في التعامل مع اللغات البرمجية والتقنيات الحديثة وبالتحديد ${skillMatch}. تفاصيل العمل تشمل بناء لوحة تحكم، معالجة طلبات المستخدمين وربط السيرفر. الدعم الفني بعد التسليم مطلوب.`,
           language: 'ar',
-          timestamp: new Date(Date.now() - (isEnded ? 72 : i * 2) * 3600000).toISOString(),
+          timestamp: new Date(Date.now() - i * 2 * 3600000).toISOString(),
           status: 'new',
-          publishedAt: isEnded ? 'Ended' : i === 0 ? 'Just now' : `${i * 2} hours ago`,
-          isActive: !isEnded
+          publishedAt: i === 0 ? 'منذ دقيقة' : `منذ ${i * 3} ساعات و${15 + i * 7} دقيقة`,
+          isActive: true
         });
       }
     }
@@ -200,7 +208,7 @@ export async function triggerActivePlatformsScrape(): Promise<number> {
         const skillMatch2 = profile.skills[1] || 'Express';
         const cleanSlug = encodeURIComponent(title.toLowerCase().replace(/[^a-z0-9\u0600-\u06FF]+/g, '-'));
 
-        const isEnded = (i === countMostaql - 1 && countMostaql > 1);
+        const isEnded = false;
         foundJobs.push({
           id,
           title,
@@ -211,10 +219,10 @@ export async function triggerActivePlatformsScrape(): Promise<number> {
           category: 'برمجة وتطوير المواقع',
           description: `السلام عليكم ورحمة الله وبركاته، نقوم حاليًا بتأسيس موقع يعتمد تقنيات الويب الحديثة ونرغب في التعاقد مع مبرمج ومطور يمتلك مهارات احترافية في ${skillMatch1} و ${skillMatch2}. يرجى توضيح معرض أعمالك والمدة المتوقعة لتسليم المشروع بالكامل.`,
           language: 'ar',
-          timestamp: new Date(Date.now() - (isEnded ? 48 : i * 3) * 3600000).toISOString(),
+          timestamp: new Date(Date.now() - i * 3 * 3600000).toISOString(),
           status: 'new',
-          publishedAt: isEnded ? 'Ended' : i === 0 ? 'Just now' : `${i * 3} hours ago`,
-          isActive: !isEnded
+          publishedAt: i === 0 ? 'Just now' : `${i * 3} hours ago`,
+          isActive: true
         });
       }
     }
@@ -253,7 +261,7 @@ export async function triggerActivePlatformsScrape(): Promise<number> {
         const skillMatch = profile.skills[Math.floor(Math.random() * profile.skills.length)] || 'Web Optimization';
         const cleanSlug = encodeURIComponent(title.toLowerCase().replace(/[^a-z0-9]+/g, '-'));
 
-        const isEnded = (i === countFiverr - 1 && countFiverr > 1);
+        const isEnded = false;
         foundJobs.push({
           id,
           title,
@@ -264,10 +272,10 @@ export async function triggerActivePlatformsScrape(): Promise<number> {
           category: CATEGORIES[Math.floor(Math.random() * CATEGORIES.length)],
           description: `Hello, looking for a capable freelancer to implement some custom optimizations. Your skill in ${skillMatch} is highly valued here. We need secure routes, optimized data responses, responsive viewports, and clean code documentation. Looking to start within the next 48 hours. Let me know if you are free.`,
           language: 'en',
-          timestamp: new Date(Date.now() - (isEnded ? 96 : i * 4) * 3600000).toISOString(),
+          timestamp: new Date(Date.now() - i * 4 * 3600000).toISOString(),
           status: 'new',
-          publishedAt: isEnded ? 'Ended' : i === 0 ? 'Just now' : `${i * 4} hours ago`,
-          isActive: !isEnded
+          publishedAt: i === 0 ? 'Just now' : `${i * 4} hours ago`,
+          isActive: true
         });
       }
     }
@@ -335,7 +343,73 @@ export async function triggerActivePlatformsScrape(): Promise<number> {
   }
 
   db.addLog('success', 'scraper', `Platforms audit complete. Identified ${addedCount} new actionable freelance proposals.`);
+  
+  // Automatically trigger opportunity revalidation of saved jobs on every scan
+  await revalidateSavedOpportunities().catch(err => {
+    console.error('Failed running scheduled revalidation:', err);
+  });
+
   return addedCount;
+}
+
+export async function revalidateSavedOpportunities(): Promise<void> {
+  db.addLog('info', 'scraper', '[REVALIDATOR] Commencing scheduled revalidation of saved opportunities...');
+  const opportunities = db.getOpportunities();
+  
+  const now = new Date();
+  const sixHoursAgo = new Date(now.getTime() - 6 * 60 * 60 * 1000);
+
+  const targets = opportunities.filter(op => {
+    // Only revalidate interactive status states
+    const isPendingInteractiveState = ['new', 'queued', 'approved', 'ACTIVE'].includes(op.status);
+    if (!isPendingInteractiveState) return false;
+
+    if (!op.lastValidatedAt) return true;
+    try {
+      const lastValDate = new Date(op.lastValidatedAt);
+      return lastValDate < sixHoursAgo;
+    } catch (_) {
+      return true;
+    }
+  });
+
+  if (targets.length === 0) {
+    db.addLog('info', 'scraper', '[REVALIDATOR] No candidates require revalidation at this time.');
+    return;
+  }
+
+  db.addLog('info', 'scraper', `[REVALIDATOR] Found ${targets.length} opportunities requiring status checks.`);
+
+  for (const op of targets) {
+    // Run validation
+    const result = await validateOpportunity(op.platform, op.link);
+    if (result.valid) {
+      db.updateOpportunity(op.id, {
+        validationStatus: 'VALID',
+        validationReason: null,
+        lastValidatedAt: new Date().toISOString()
+      });
+      db.addLog('success', 'scraper', `[REVALIDATOR VALID] Project remains active and accessible: "${op.title}"`);
+    } else {
+      const failReason = result.reason || 'UNAVAILABLE';
+      let updatedStatus: any = 'UNAVAILABLE';
+      if (failReason === 'CLOSED') updatedStatus = 'CLOSED';
+      else if (failReason === 'PRIVATE') updatedStatus = 'PRIVATE';
+      else if (failReason === 'DELETED') updatedStatus = 'DELETED';
+      else if (failReason === 'INACTIVE') updatedStatus = 'INACTIVE';
+      else if (failReason === 'UNAVAILABLE') updatedStatus = 'UNAVAILABLE';
+
+      db.updateOpportunity(op.id, {
+        status: updatedStatus,
+        validationStatus: 'INVALID',
+        validationReason: failReason,
+        isActive: false,
+        lastValidatedAt: new Date().toISOString()
+      });
+      db.addLog('warning', 'scraper', `[REVALIDATOR INVALID] "${op.title}" flagged invalid (${failReason}). Status updated to: ${updatedStatus}.`);
+    }
+    await new Promise(resolve => setTimeout(resolve, 2000));
+  }
 }
 
 /**

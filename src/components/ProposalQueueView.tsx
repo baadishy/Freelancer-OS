@@ -271,6 +271,19 @@ export default function ProposalQueueView({ onNavigate, onShowToast }: ProposalQ
                     </div>
                   </div>
 
+                  {/* Devalidated Opportunity Warning */}
+                  {matchedJob && matchedJob.validationStatus === 'INVALID' && (
+                    <div className="p-3 bg-rose-500/10 border border-rose-500/20 rounded text-rose-450 text-xs font-mono flex items-start gap-2">
+                      <span className="text-rose-400 mt-0.5 shrink-0">⚠️</span>
+                      <div className="space-y-1">
+                        <strong className="text-rose-300">Opportunity Devalidated</strong>
+                        <p className="text-[11px] leading-relaxed text-rose-400/90">
+                          This job has been flagged as {matchedJob.validationReason || 'inactive/deleted'} during verification. Auto-posting is locked. Bidding on closed target channels is highly discouraged.
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
                   {/* Proposal Text box / Editor */}
                   {isEditing ? (
                     <div className="space-y-2">
@@ -352,10 +365,21 @@ export default function ProposalQueueView({ onNavigate, onShowToast }: ProposalQ
                         <>
                           <button
                             id={`pq-autosubmit-${prop.id}-btn`}
-                            onClick={() => handleAutoSubmitProposal(prop.id)}
-                            className="flex items-center gap-1.5 px-4 py-2 bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white border border-indigo-500/30 text-[11px] font-extrabold uppercase tracking-widest rounded shadow-md transition cursor-pointer"
+                            onClick={() => {
+                              if (matchedJob && matchedJob.validationStatus === 'INVALID') {
+                                onShowToast('Submission locked: The underlying opportunity is devalidated.', 'error');
+                                return;
+                              }
+                              handleAutoSubmitProposal(prop.id);
+                            }}
+                            disabled={matchedJob?.validationStatus === 'INVALID'}
+                            className={`flex items-center gap-1.5 px-4 py-2 text-[11px] font-extrabold uppercase tracking-widest rounded shadow-md border transition cursor-pointer ${
+                              matchedJob?.validationStatus === 'INVALID'
+                                ? 'bg-[#07080d] border-[#1e2235] text-slate-500 opacity-40 cursor-not-allowed'
+                                : 'bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white border-indigo-500/30'
+                            }`}
                           >
-                            <Sparkles size={13} className="text-yellow-300 animate-pulse" />
+                            <Sparkles size={13} className={matchedJob?.validationStatus === 'INVALID' ? "text-slate-500" : "text-yellow-300 animate-pulse"} />
                             Auto-Post (AI Agent)
                           </button>
                           

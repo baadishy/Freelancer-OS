@@ -65,12 +65,21 @@ export interface Opportunity {
   description: string;
   language: 'ar' | 'en';
   timestamp: string;
-  status: 'new' | 'ignored' | 'queued' | 'approved' | 'submitted' | 'rejected';
+  status: 'new' | 'ignored' | 'queued' | 'approved' | 'submitted' | 'rejected' | 'ACTIVE' | 'INACTIVE' | 'CLOSED' | 'PRIVATE' | 'DELETED' | 'UNAVAILABLE' | 'REDIRECTED' | 'INVALID';
   matchAnalysis?: MatchAnalysis;
   proposalId?: string;
   hidden?: boolean;
   publishedAt?: string;
   isActive?: boolean;
+  validationStatus?: 'VALID' | 'INVALID' | 'PRIVATE' | 'CLOSED' | 'DELETED' | 'UNAVAILABLE' | 'INACTIVE' | 'PENDING' | 'REDIRECTED';
+  validationReason?: string | null;
+  canonicalUrl?: string;
+  lastValidatedAt?: string;
+  originalUrl?: string;
+  finalUrl?: string;
+  serviceId?: string;
+  finalServiceId?: string;
+  redirectDetected?: boolean;
 }
 
 export interface Proposal {
