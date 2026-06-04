@@ -551,7 +551,7 @@ export default function SettingsView({ onShowToast, onLogout }: SettingsViewProp
             Active Opportunity Link Debugger & Tracer
           </h3>
           <p className="text-[10px] text-slate-400 font-mono uppercase tracking-wide mt-1">
-            Is a specific Khamsat, Mostaql or Fiverr link failing to scraper/alert correctly? Paste it below to run step-by-step connection, session-wall, DOM extraction, and formatting diagnostic tests.
+            Is a specific Khamsat or Mostaql link failing to scraper/alert correctly? Paste it below to run step-by-step connection, session-wall, DOM extraction, and formatting diagnostic tests.
           </p>
         </div>
 

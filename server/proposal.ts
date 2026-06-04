@@ -43,10 +43,11 @@ export async function analyzeOpportunity(
   profile: FreelancerProfile,
   op: Opportunity
 ): Promise<MatchAnalysis> {
-  // Enforce AI Integration Rule: Refuse to analyze if validationStatus !== 'VALID'
-  if (op.validationStatus !== 'VALID') {
-    db.addLog('warning', 'gemini', `[AI REFUSED] Refused to analyze opportunity "${op.title}" (${op.id}). validationStatus: ${op.validationStatus || 'unvalidated'}`);
-    throw new Error(`AI Match Analysis Refused: Target opportunity has validation status '${op.validationStatus || 'unvalidated'}'. Only active, validated jobs can be analyzed.`);
+  // Enforce AI Integration Rule: Refuse to analyze if validationStatus !== 'VALID' or cannot apply or healthScore < 80
+  const hScore = op.healthScore !== undefined ? op.healthScore : 100;
+  if (op.validationStatus !== 'VALID' || op.canApply === false || hScore < 80) {
+    db.addLog('warning', 'gemini', `[AI REFUSED] Refused to analyze opportunity "${op.title}" (${op.id}). Status: ${op.validationStatus || 'unvalidated'}, canApply: ${op.canApply}, healthScore: ${hScore}`);
+    throw new Error(`AI Match Analysis Refused: Target opportunity does not satisfy health eligibility. Needs status 'VALID', canApply: true, and healthScore >= 80.`);
   }
 
   const now = Date.now();
@@ -234,10 +235,10 @@ export async function writeProposal(
   customTone?: string,
   customLength?: 'short' | 'medium' | 'long'
 ): Promise<string> {
-  // Enforce Proposal Engine Rules: Requires validationStatus = VALID
-  if (op.validationStatus !== 'VALID') {
-    db.addLog('warning', 'automation', `[PROPOSAL REFUSED] Locked proposal generation for invalid opportunity "${op.title}" (${op.id}). validationStatus: ${op.validationStatus || 'unvalidated'}`);
-    throw new Error(`Proposal Generation Refused: Target opportunity has validationStatus '${op.validationStatus || 'unvalidated'}'. Generation only allowed for active, valid items.`);
+  // Enforce Proposal Engine Rules: Requires validationStatus = VALID and canApply = true
+  if (op.validationStatus !== 'VALID' || op.canApply === false) {
+    db.addLog('warning', 'automation', `[PROPOSAL REFUSED] Locked proposal generation for invalid opportunity "${op.title}" (${op.id}). Status: ${op.validationStatus || 'unvalidated'}, canApply: ${op.canApply}`);
+    throw new Error(`Proposal Generation Refused: Target opportunity has validationStatus '${op.validationStatus || 'unvalidated'}' or canApply: ${op.canApply}. Generation only allowed for active, valid items.`);
   }
 
   const now = Date.now();

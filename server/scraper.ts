@@ -142,7 +142,25 @@ export async function triggerActivePlatformsScrape(): Promise<number> {
           finalUrl: job.finalUrl,
           serviceId: job.serviceId,
           finalServiceId: job.finalServiceId,
-          redirectDetected: job.redirectDetected
+          redirectDetected: job.redirectDetected,
+          pageType: job.pageType,
+          platformId: job.platformId,
+          canApply: job.canApply,
+          redirectChain: job.redirectChain,
+          healthScore: job.healthScore,
+          debugScreenshotPath: job.debugScreenshotPath,
+          pageTitle: job.pageTitle,
+          pageContentSnippet: job.pageContentSnippet,
+          boardTitle: job.boardTitle,
+          boardSnippet: job.boardSnippet,
+          boardCategory: job.boardCategory,
+          liveTitle: job.liveTitle,
+          liveCategory: job.liveCategory,
+          titleSimilarity: job.titleSimilarity,
+          descriptionSimilarity: job.descriptionSimilarity,
+          semanticValidation: job.semanticValidation,
+          semanticValidationReason: job.semanticValidationReason,
+          sourceType: 'REAL'
         });
       });
     } else {
@@ -154,7 +172,6 @@ export async function triggerActivePlatformsScrape(): Promise<number> {
         const skillMatch = profile.skills[Math.floor(Math.random() * profile.skills.length)] || 'تطوير ويب';
         const cleanSlug = encodeURIComponent(title.toLowerCase().replace(/[^a-z0-9\u0600-\u06FF]+/g, '-'));
         
-        const isEnded = false;
         foundJobs.push({
           id,
           title,
@@ -168,7 +185,8 @@ export async function triggerActivePlatformsScrape(): Promise<number> {
           timestamp: new Date(Date.now() - i * 2 * 3600000).toISOString(),
           status: 'new',
           publishedAt: i === 0 ? 'منذ دقيقة' : `منذ ${i * 3} ساعات و${15 + i * 7} دقيقة`,
-          isActive: true
+          isActive: true,
+          sourceType: 'SIMULATED'
         });
       }
     }
@@ -195,7 +213,34 @@ export async function triggerActivePlatformsScrape(): Promise<number> {
           timestamp: new Date().toISOString(),
           status: 'new',
           publishedAt: 'Just now',
-          isActive: true
+          isActive: true,
+          validationStatus: job.validationStatus,
+          validationReason: job.validationReason,
+          lastValidatedAt: job.lastValidatedAt,
+          originalUrl: job.originalUrl,
+          finalUrl: job.finalUrl,
+          serviceId: job.serviceId,
+          finalServiceId: job.finalServiceId,
+          redirectDetected: job.redirectDetected,
+          pageType: job.pageType,
+          platformId: job.platformId,
+          canApply: job.canApply,
+          redirectChain: job.redirectChain,
+          healthScore: job.healthScore,
+          debugScreenshotPath: job.debugScreenshotPath,
+          pageTitle: job.pageTitle,
+          pageContentSnippet: job.pageContentSnippet,
+          boardTitle: job.boardTitle,
+          boardSnippet: job.boardSnippet,
+          boardCategory: job.boardCategory,
+          liveTitle: job.liveTitle,
+          liveCategory: job.liveCategory,
+          titleSimilarity: job.titleSimilarity,
+          descriptionSimilarity: job.descriptionSimilarity,
+          semanticValidation: job.semanticValidation,
+          semanticValidationReason: job.semanticValidationReason,
+          period: job.period,
+          sourceType: 'REAL'
         });
       });
     } else {
@@ -208,7 +253,6 @@ export async function triggerActivePlatformsScrape(): Promise<number> {
         const skillMatch2 = profile.skills[1] || 'Express';
         const cleanSlug = encodeURIComponent(title.toLowerCase().replace(/[^a-z0-9\u0600-\u06FF]+/g, '-'));
 
-        const isEnded = false;
         foundJobs.push({
           id,
           title,
@@ -222,7 +266,9 @@ export async function triggerActivePlatformsScrape(): Promise<number> {
           timestamp: new Date(Date.now() - i * 3 * 3600000).toISOString(),
           status: 'new',
           publishedAt: i === 0 ? 'Just now' : `${i * 3} hours ago`,
-          isActive: true
+          isActive: true,
+          period: 5 + Math.floor(Math.random() * 25),
+          sourceType: 'SIMULATED'
         });
       }
     }
@@ -249,7 +295,33 @@ export async function triggerActivePlatformsScrape(): Promise<number> {
           timestamp: new Date().toISOString(),
           status: 'new',
           publishedAt: 'Just now',
-          isActive: true
+          isActive: true,
+          validationStatus: job.validationStatus,
+          validationReason: job.validationReason,
+          lastValidatedAt: job.lastValidatedAt,
+          originalUrl: job.originalUrl,
+          finalUrl: job.finalUrl,
+          serviceId: job.serviceId,
+          finalServiceId: job.finalServiceId,
+          redirectDetected: job.redirectDetected,
+          pageType: job.pageType,
+          platformId: job.platformId,
+          canApply: job.canApply,
+          redirectChain: job.redirectChain,
+          healthScore: job.healthScore,
+          debugScreenshotPath: job.debugScreenshotPath,
+          pageTitle: job.pageTitle,
+          pageContentSnippet: job.pageContentSnippet,
+          boardTitle: job.boardTitle,
+          boardSnippet: job.boardSnippet,
+          boardCategory: job.boardCategory,
+          liveTitle: job.liveTitle,
+          liveCategory: job.liveCategory,
+          titleSimilarity: job.titleSimilarity,
+          descriptionSimilarity: job.descriptionSimilarity,
+          semanticValidation: job.semanticValidation,
+          semanticValidationReason: job.semanticValidationReason,
+          sourceType: 'REAL'
         });
       });
     } else {
@@ -261,7 +333,6 @@ export async function triggerActivePlatformsScrape(): Promise<number> {
         const skillMatch = profile.skills[Math.floor(Math.random() * profile.skills.length)] || 'Web Optimization';
         const cleanSlug = encodeURIComponent(title.toLowerCase().replace(/[^a-z0-9]+/g, '-'));
 
-        const isEnded = false;
         foundJobs.push({
           id,
           title,
@@ -275,7 +346,8 @@ export async function triggerActivePlatformsScrape(): Promise<number> {
           timestamp: new Date(Date.now() - i * 4 * 3600000).toISOString(),
           status: 'new',
           publishedAt: i === 0 ? 'Just now' : `${i * 4} hours ago`,
-          isActive: true
+          isActive: true,
+          sourceType: 'SIMULATED'
         });
       }
     }
@@ -286,9 +358,92 @@ export async function triggerActivePlatformsScrape(): Promise<number> {
   // Save jobs to database and trigger AI analysis automatically
   let addedCount = 0;
   for (const job of foundJobs) {
+    // ----------------------------------------
+    // PIPELINE STAGE: SIMULATED vs REAL HANDLER
+    // ----------------------------------------
+    if (job.sourceType === 'SIMULATED') {
+      // Simulated sandbox mock entries bypass live Playwright validations & block network checks
+      job.validationStatus = 'VALID';
+      job.validationReason = null;
+      job.lastValidatedAt = new Date().toISOString();
+      
+      const added = db.addOpportunity(job);
+      if (added.status === 'new') {
+        addedCount++;
+        db.addLog('success', 'scraper', `[SANDBOX SAVE] Saved simulated sandbox option to feed: "${job.title}"`);
+      }
+      continue;
+    }
+
+    // Real opportunities undergo validation & high-fidelity checks
+    db.addLog('info', 'scraper', `[PRE-SAVE PROCESS] Running live browser validation on parsed opportunity: "${job.title}" (${job.link})`);
+    
+    // Call the validation exactly like revalidate-all
+    const validationResult = await validateOpportunity(job.platform, job.link, undefined, job.title, {
+      boardTitle: job.title,
+      boardSnippet: job.description,
+      boardCategory: job.category,
+      boardRequestId: job.id,
+      boardUrl: job.link
+    });
+
+    if (validationResult.valid) {
+      const details = validationResult.additionalData || {};
+      job.validationStatus = 'VALID';
+      job.validationReason = null;
+      job.lastValidatedAt = new Date().toISOString();
+      job.canonicalUrl = validationResult.canonicalUrl || job.canonicalUrl;
+      job.finalUrl = details.finalUrl || job.finalUrl;
+      job.pageType = details.pageType || job.pageType;
+      job.platformId = details.platformId || job.platformId;
+      job.canApply = details.canApply !== undefined ? details.canApply : true;
+      job.redirectDetected = details.redirectDetected || false;
+      job.redirectChain = details.redirectChain || [];
+      job.healthScore = details.healthScore !== undefined ? details.healthScore : 100;
+      job.debugScreenshotPath = details.debugScreenshotPath || job.debugScreenshotPath;
+      job.pageTitle = details.pageTitle || job.pageTitle;
+      job.pageContentSnippet = details.pageContentSnippet || job.pageContentSnippet;
+      job.boardTitle = details.boardTitle || job.boardTitle;
+      job.boardSnippet = details.boardSnippet || job.boardSnippet;
+      job.boardCategory = details.boardCategory || job.boardCategory;
+      job.liveTitle = details.liveTitle || job.liveTitle;
+      job.liveCategory = details.liveCategory || job.liveCategory;
+      job.titleSimilarity = details.titleSimilarity !== undefined ? details.titleSimilarity : job.titleSimilarity;
+      job.descriptionSimilarity = details.descriptionSimilarity !== undefined ? details.descriptionSimilarity : job.descriptionSimilarity;
+      job.semanticValidation = details.semanticValidation !== undefined ? details.semanticValidation : job.semanticValidation;
+      job.semanticValidationReason = details.semanticValidationReason || job.semanticValidationReason;
+
+      db.addLog('success', 'scraper', `[PRE-SAVE VALID] Confirmed parsed link is fully valid: "${job.title}" (Health score Match: ${job.healthScore})`);
+    } else {
+      const failReason = validationResult.reason || 'UNAVAILABLE';
+      
+      // OPTIMIZATION: Handle temporary SOFT_INVALID status instead of immediate deletion
+      const isSoftInvalid = ['TIMEOUT', 'RATE_LIMIT', 'SOFT_INVALID', 'UNAVAILABLE'].includes(failReason);
+      if (isSoftInvalid) {
+        job.validationStatus = 'PENDING';
+        job.status = 'soft_invalid';
+        job.validationReason = failReason;
+        job.lastValidatedAt = new Date().toISOString();
+        
+        db.addOpportunity(job);
+        db.addLog('warning', 'scraper', `[SOFT_INVALID SAVED] Retained temporary soft-invalid / rate-limited opportunity: "${job.title}". Status set to soft_invalid, revalidating later.`);
+        continue;
+      }
+
+      db.addLog('warning', 'scraper', `[PRE-SAVE REJECT & SKIP] Skipped saving invalid, ended or incorrect opportunity: "${job.title}" (Reason: ${failReason}).`);
+      
+      // Space out consecutive browser visits slightly to keep profiles healthy
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      continue;
+    }
+
+    // Space out consecutive browser visits slightly to keep profiles healthy
+    await new Promise(resolve => setTimeout(resolve, 1000));
+
     const added = db.addOpportunity(job);
-    // If it's a completely new job, analyze it and maybe trigger notification
-    if (added.status === 'new' && !added.matchAnalysis) {
+    
+    // Core Mandate: Only REAL Opportunities undergo AI Scoring and Proposal automatic queueing
+    if (added.status === 'new' && !added.matchAnalysis && added.sourceType === 'REAL') {
       if (addedCount > 0) {
         // Space out requests to avoid hitting rate-limits / quota peaks instantly
         await new Promise(resolve => setTimeout(resolve, 1500));
@@ -304,7 +459,7 @@ export async function triggerActivePlatformsScrape(): Promise<number> {
         db.addLog('success', 'automation', `[AUTO] Pre-approved job "${added.title}" to proposals queue - Match score ${analysis.score}% meets threshold (${settings.autoApproveMinScore}%). Generating proposal...`);
         
         try {
-          const pitchContent = await writeProposal(profile, added, profile.proposalTone || 'professional', profile.proposalLength || 'medium');
+          const pitchContent = await writeProposal(profile, added, profile.proposalTone || 'professional', profile.proposalTone ? 'medium' : 'medium');
           const propId = `prop-auto-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
           const newProp = {
             id: propId,
@@ -333,9 +488,9 @@ export async function triggerActivePlatformsScrape(): Promise<number> {
         } catch (autoErr: any) {
           db.addLog('error', 'automation', `[AUTO-SUBMIT ERROR] Failed inside auto-proposal generator or poster: ${autoErr.message}`);
         }
-      } else if (analysis.score >= 80) {
+      } else if (analysis.score >= 70) {
         // Log match
-        db.addLog('success', 'gemini', `Found exceptionally strong match (${analysis.score}%): "${added.title}" on ${added.platform}!`);
+        db.addLog('success', 'gemini', `Found strong match (${analysis.score}%): "${added.title}" on ${added.platform}!`);
         // Send alert via Telegram message
         await sendJobMatchAlert(added, analysis.score);
       }
@@ -352,8 +507,8 @@ export async function triggerActivePlatformsScrape(): Promise<number> {
   return addedCount;
 }
 
-export async function revalidateSavedOpportunities(): Promise<void> {
-  db.addLog('info', 'scraper', '[REVALIDATOR] Commencing scheduled revalidation of saved opportunities...');
+export async function revalidateSavedOpportunities(force: boolean = false): Promise<void> {
+  db.addLog('info', 'scraper', `[REVALIDATOR] Commencing scheduled revalidation of saved opportunities (force mode: ${force})...`);
   const opportunities = db.getOpportunities();
   
   const now = new Date();
@@ -361,8 +516,10 @@ export async function revalidateSavedOpportunities(): Promise<void> {
 
   const targets = opportunities.filter(op => {
     // Only revalidate interactive status states
-    const isPendingInteractiveState = ['new', 'queued', 'approved', 'ACTIVE'].includes(op.status);
+    const isPendingInteractiveState = ['new', 'queued', 'approved', 'ACTIVE', 'soft_invalid', 'SOFT_INVALID'].includes(op.status);
     if (!isPendingInteractiveState) return false;
+
+    if (force) return true; // Force revalidation, bypassing cache time limits
 
     if (!op.lastValidatedAt) return true;
     try {
@@ -381,15 +538,42 @@ export async function revalidateSavedOpportunities(): Promise<void> {
   db.addLog('info', 'scraper', `[REVALIDATOR] Found ${targets.length} opportunities requiring status checks.`);
 
   for (const op of targets) {
-    // Run validation
-    const result = await validateOpportunity(op.platform, op.link);
+    // Run validation with board data stored on opportunity
+    const result = await validateOpportunity(op.platform, op.link, undefined, op.boardTitle, {
+      boardTitle: op.boardTitle,
+      boardSnippet: op.boardSnippet,
+      boardCategory: op.boardCategory,
+      boardRequestId: op.id,
+      boardUrl: op.link
+    });
     if (result.valid) {
+      const details = result.additionalData || {};
       db.updateOpportunity(op.id, {
         validationStatus: 'VALID',
         validationReason: null,
-        lastValidatedAt: new Date().toISOString()
+        lastValidatedAt: new Date().toISOString(),
+        canonicalUrl: result.canonicalUrl || op.canonicalUrl,
+        finalUrl: details.finalUrl || op.finalUrl,
+        pageType: details.pageType || op.pageType,
+        platformId: details.platformId || op.platformId,
+        canApply: details.canApply !== undefined ? details.canApply : true,
+        redirectDetected: details.redirectDetected || false,
+        redirectChain: details.redirectChain || [],
+        healthScore: details.healthScore !== undefined ? details.healthScore : 100,
+        debugScreenshotPath: details.debugScreenshotPath || op.debugScreenshotPath,
+        pageTitle: details.pageTitle || op.pageTitle,
+        pageContentSnippet: details.pageContentSnippet || op.pageContentSnippet,
+        boardTitle: details.boardTitle || op.boardTitle,
+        boardSnippet: details.boardSnippet || op.boardSnippet,
+        boardCategory: details.boardCategory || op.boardCategory,
+        liveTitle: details.liveTitle || op.liveTitle,
+        liveCategory: details.liveCategory || op.liveCategory,
+        titleSimilarity: details.titleSimilarity !== undefined ? details.titleSimilarity : op.titleSimilarity,
+        descriptionSimilarity: details.descriptionSimilarity !== undefined ? details.descriptionSimilarity : op.descriptionSimilarity,
+        semanticValidation: details.semanticValidation !== undefined ? details.semanticValidation : op.semanticValidation,
+        semanticValidationReason: details.semanticValidationReason || op.semanticValidationReason
       });
-      db.addLog('success', 'scraper', `[REVALIDATOR VALID] Project remains active and accessible: "${op.title}"`);
+      db.addLog('success', 'scraper', `[REVALIDATOR VALID] Project remains active and accessible: "${op.title}" (Health score Match: ${details.healthScore || 100})`);
     } else {
       const failReason = result.reason || 'UNAVAILABLE';
       let updatedStatus: any = 'UNAVAILABLE';
@@ -398,15 +582,37 @@ export async function revalidateSavedOpportunities(): Promise<void> {
       else if (failReason === 'DELETED') updatedStatus = 'DELETED';
       else if (failReason === 'INACTIVE') updatedStatus = 'INACTIVE';
       else if (failReason === 'UNAVAILABLE') updatedStatus = 'UNAVAILABLE';
+      else if (failReason === 'CONTENT_MISMATCH') updatedStatus = 'INVALID';
 
+      const details = result.additionalData || {};
       db.updateOpportunity(op.id, {
         status: updatedStatus,
         validationStatus: 'INVALID',
         validationReason: failReason,
         isActive: false,
-        lastValidatedAt: new Date().toISOString()
+        lastValidatedAt: new Date().toISOString(),
+        canonicalUrl: result.canonicalUrl || op.canonicalUrl,
+        finalUrl: details.finalUrl || op.finalUrl,
+        pageType: details.pageType || op.pageType,
+        platformId: details.platformId || op.platformId,
+        canApply: details.canApply !== undefined ? details.canApply : false,
+        redirectDetected: details.redirectDetected || false,
+        redirectChain: details.redirectChain || [],
+        healthScore: details.healthScore !== undefined ? details.healthScore : 0,
+        debugScreenshotPath: details.debugScreenshotPath || op.debugScreenshotPath,
+        pageTitle: details.pageTitle || op.pageTitle,
+        pageContentSnippet: details.pageContentSnippet || op.pageContentSnippet,
+        boardTitle: details.boardTitle || op.boardTitle,
+        boardSnippet: details.boardSnippet || op.boardSnippet,
+        boardCategory: details.boardCategory || op.boardCategory,
+        liveTitle: details.liveTitle || op.liveTitle,
+        liveCategory: details.liveCategory || op.liveCategory,
+        titleSimilarity: details.titleSimilarity !== undefined ? details.titleSimilarity : op.titleSimilarity,
+        descriptionSimilarity: details.descriptionSimilarity !== undefined ? details.descriptionSimilarity : op.descriptionSimilarity,
+        semanticValidation: details.semanticValidation !== undefined ? details.semanticValidation : op.semanticValidation,
+        semanticValidationReason: details.semanticValidationReason || op.semanticValidationReason
       });
-      db.addLog('warning', 'scraper', `[REVALIDATOR INVALID] "${op.title}" flagged invalid (${failReason}). Status updated to: ${updatedStatus}.`);
+      db.addLog('warning', 'scraper', `[REVALIDATOR INVALID] "${op.title}" flagged invalid (${failReason}). Status updated to: ${updatedStatus}. Health Score: ${details.healthScore || 0}`);
     }
     await new Promise(resolve => setTimeout(resolve, 2000));
   }

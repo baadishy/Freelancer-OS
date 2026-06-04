@@ -1,0 +1,83 @@
+{
+  "entities": {
+    "SystemConfig": {
+      "title": "SystemConfig",
+      "description": "Unified system configuration, profiles, logs, and billing details",
+      "type": "object",
+      "properties": {
+        "users": {
+          "type": "array",
+          "description": "User account entries"
+        },
+        "profile": {
+          "type": "object",
+          "description": "Freelancer active resume guidelines and credentials"
+        },
+        "telegramSettings": {
+          "type": "object",
+          "description": "Telegram bot alerts preferences"
+        },
+        "automationSettings": {
+          "type": "object",
+          "description": "Gemini models selection and scheduling modes"
+        },
+        "logs": {
+          "type": "array",
+          "description": "Truncated trace operations log"
+        },
+        "accounts": {
+          "type": "array",
+          "description": "Snooped cookies connection metrics"
+        }
+      },
+      "required": ["profile", "telegramSettings", "automationSettings"]
+    },
+    "Opportunity": {
+      "title": "Opportunity",
+      "description": "Saved active crawlers job posting metadata",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "platform": { "type": "string" },
+        "title": { "type": "string" },
+        "link": { "type": "string" },
+        "description": { "type": "string" },
+        "budget": { "type": "string" },
+        "clientName": { "type": "string" },
+        "category": { "type": "string" },
+        "timestamp": { "type": "string" },
+        "validationStatus": { "type": "string" },
+        "status": { "type": "string" }
+      },
+      "required": ["id", "platform", "title", "link", "description"]
+    },
+    "Proposal": {
+      "title": "Proposal",
+      "description": "AI drafted outreach pitches",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "opportunityId": { "type": "string" },
+        "content": { "type": "string" },
+        "status": { "type": "string" },
+        "timestamp": { "type": "string" },
+        "archived": { "type": "boolean" }
+      },
+      "required": ["id", "opportunityId", "content", "status"]
+    }
+  },
+  "firestore": {
+    "/system/config": {
+      "schema": "SystemConfig",
+      "description": "Global backup containing profiles and logs state"
+    },
+    "/opportunities/{opportunityId}": {
+      "schema": "Opportunity",
+      "description": "Individual project items cache"
+    },
+    "/proposals/{proposalId}": {
+      "schema": "Proposal",
+      "description": "Individual draft proposals"
+    }
+  }
+}

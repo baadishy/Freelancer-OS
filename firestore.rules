@@ -1,0 +1,17 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Allow Express backend to securely sync state using the web SDK
+    match /system/config {
+      allow read, write: if true;
+    }
+
+    match /opportunities/{opportunityId} {
+      allow read, write: if true;
+    }
+
+    match /proposals/{proposalId} {
+      allow read, write: if true;
+    }
+  }
+}

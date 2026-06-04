@@ -10,6 +10,8 @@ import { db } from './db.js';
 
 // Re-export type definitions to support schema verification if needed
 import { ConnectedAccount } from '../src/types.js';
+import { resolveAndValidateUrl, BoardData } from './url-resolver.js';
+import { recordDiscovery } from './scraper-analytics.js';
 
 /**
  * Utility to extract service/request ID from any Khamsat URL
@@ -163,6 +165,20 @@ export async function launchPlaywrightPersistent(platform: 'Khamsat' | 'Mostaql'
   );
 
   const context = await Promise.race([launchPromise, timeoutPromise]);
+
+  // Persistent session cookie restoration for 24/7 durability on ephemeral Cloud Run containers
+  try {
+    const account = db.getAccount(platform);
+    if (account && account.cookiesJson) {
+      const savedCookies = JSON.parse(account.cookiesJson);
+      if (Array.isArray(savedCookies) && savedCookies.length > 0) {
+        db.addLog('info', 'automation', `[24/7 Persistence] Injecting ${savedCookies.length} saved session cookies for ${platform}...`);
+        await context.addCookies(savedCookies);
+      }
+    }
+  } catch (cookieErr: any) {
+    db.addLog('warning', 'automation', `Failed to inject saved cookies for ${platform}: ${cookieErr.message}`);
+  }
 
   // Antbot Playwright Evasion & Spoofing Init Script
   await context.addInitScript(() => {
@@ -369,22 +385,10 @@ class PlaywrightSessionManager {
 
     let url = this.page.url();
     
-    // If on Google OAuth or Hsoub Identity pages, attempt navigation to check if they completed the login successfully
-    if (url.includes('google.com') || url.includes('hsoub.com')) {
-      try {
-        let destUrl = 'https://khamsat.com/community/requests';
-        if (this.platform === 'Mostaql') {
-          destUrl = 'https://mostaql.com/projects';
-        } else if (this.platform === 'Fiverr') {
-          destUrl = 'https://www.fiverr.com';
-        }
-        db.addLog('info', 'automation', `Detecting Google/Hsoub login redirect. Verifying live session status at: ${destUrl}`);
-        await this.page.goto(destUrl, { waitUntil: 'domcontentloaded', timeout: 8000 });
-        await this.page.waitForTimeout(1500);
-        url = this.page.url();
-      } catch (e: any) {
-        db.addLog('warning', 'automation', `SSO redirect check navigation timed out/failed: ${e.message}`);
-      }
+    // If on Google OAuth or Hsoub Identity/Login pages, let the user complete manual login.
+    // Do NOT force navigation to destUrl, as this destroys their typing progress/redirection and returns them to the login-wall.
+    if (url.includes('google.com') || url.includes('hsoub.com') || url.includes('accounts.google.com') || url.includes('accounts.hsoub.com')) {
+      return { authenticated: false };
     }
 
     let authenticated = false;
@@ -440,13 +444,25 @@ class PlaywrightSessionManager {
     const { username } = await this.checkAuthStatus();
     const profileDir = path.join(process.cwd(), 'data', 'browser-profiles', this.platform.toLowerCase());
 
+    let cookiesJson: string | undefined = undefined;
+    try {
+      const cookiesList = await this.context.cookies();
+      if (cookiesList && cookiesList.length > 0) {
+        cookiesJson = JSON.stringify(cookiesList);
+        db.addLog('info', 'automation', `[24/7 Persistence] Extracted and backed up ${cookiesList.length} session cookies during interactive account verification.`);
+      }
+    } catch (cookieErr: any) {
+      db.addLog('warning', 'automation', `Could not extract session cookies during interactive connection: ${cookieErr.message}`);
+    }
+
     db.updateAccount(this.platform, {
       status: 'CONNECTED',
       username: username || 'Verified Account',
       lastLogin: new Date().toISOString(),
       lastValidation: new Date().toISOString(),
       errorMessage: undefined,
-      profileLocation: profileDir
+      profileLocation: profileDir,
+      cookiesJson
     });
 
     db.addLog('success', 'automation', `Playwright persistent profile verified and finalized for ${this.platform} at ${profileDir}.`);
@@ -554,11 +570,22 @@ export async function validatePlatformSession(platform: 'Khamsat' | 'Mostaql' | 
     }
 
     if (authenticated) {
+      let cookiesJson: string | undefined = undefined;
+      try {
+        const cookiesList = await context.cookies();
+        if (cookiesList && cookiesList.length > 0) {
+          cookiesJson = JSON.stringify(cookiesList);
+        }
+      } catch (cookieErr: any) {
+        console.error('Failed to dump cookies in validatePlatformSession:', cookieErr);
+      }
+
       db.updateAccount(platform, {
         status: 'CONNECTED',
         username: username || 'Connected User',
         lastValidation: new Date().toISOString(),
-        profileLocation: profileDir
+        profileLocation: profileDir,
+        cookiesJson
       });
       return { status: 'CONNECTED', username };
     } else {
@@ -610,15 +637,38 @@ export async function submitProposalViaPlaywright(proposalId: string): Promise<{
 
   db.addLog('info', 'automation', `Launching Playwright secure persistent context to auto-submit bid to ${platform}...`);
 
+  const screensDir = path.join(process.cwd(), 'data', 'screenshots');
+  if (!fs.existsSync(screensDir)) {
+    fs.mkdirSync(screensDir, { recursive: true });
+  }
+
+  const screenshots: { title: string; filename: string; timestamp: string }[] = [];
+
   let context: BrowserContext | null = null;
   try {
     context = await launchPlaywrightPersistent(platform);
     const pages = context.pages();
     const page = pages.length > 0 ? pages[0] : await context.newPage();
 
+    const takeScreenshot = async (title: string) => {
+      try {
+        const filename = `${proposalId}_${Date.now()}_${Math.floor(Math.random() * 1000)}.png`;
+        const screenshotPath = path.join(screensDir, filename);
+        await page.screenshot({ path: screenshotPath }).catch(() => {});
+        screenshots.push({ title, filename, timestamp: new Date().toISOString() });
+        db.updateProposal(proposalId, { 
+          submissionDebugScreenshots: [...screenshots]
+        });
+        db.addLog('info', 'automation', `[Visual Debug Camera] Captured: ${title} (${filename})`);
+      } catch (e: any) {
+        console.error(`Failed to take screenshot "${title}":`, e.message);
+      }
+    };
+
     db.addLog('info', 'automation', `Navigating to project link for pre-submission checks: ${op.link}`);
     await page.goto(op.link, { waitUntil: 'domcontentloaded', timeout: 30000 });
     await page.waitForTimeout(2000);
+    await takeScreenshot('1. Project Page Loaded');
 
     // Enforce Auto-Submission Rules: re-run full validation checks on the page and abort if they fail
     const preSubmissionCheck = await validateOpportunity(platform, op.link, page);
@@ -638,6 +688,9 @@ export async function submitProposalViaPlaywright(proposalId: string): Promise<{
         isActive: false,
         lastValidatedAt: new Date().toISOString()
       });
+
+      await takeScreenshot(`Validation Failed: ${failReason}`);
+      db.updateProposal(proposalId, { submissionError: `Opportunity became invalid or closed: ${failReason}` });
 
       db.addLog('error', 'automation', `[AUTO-SUBMIT ABORT] Pre-submission validation failed for "${op.title}". Opportunity marked as ${updatedStatus} (${failReason}).`);
       return {
@@ -664,6 +717,8 @@ export async function submitProposalViaPlaywright(proposalId: string): Promise<{
 
     if (!authenticated) {
       db.updateAccount(platform, { status: 'EXPIRED', errorMessage: 'Automated bidding detected session expired.' });
+      await takeScreenshot('Authentication Expired Screen');
+      db.updateProposal(proposalId, { submissionError: 'Session expired. Reconnect your account first.' });
       db.addLog('warning', 'automation', `Bidding deferred: Session expired for platform ${platform}. Action needed: Reconnect Account.`);
       return { 
         success: false, 
@@ -679,13 +734,20 @@ export async function submitProposalViaPlaywright(proposalId: string): Promise<{
       if (textarea) {
         await textarea.fill(prop.content);
         await page.waitForTimeout(500);
+        await takeScreenshot('2. Form Textarea Filled');
+
         const submitBtn = await page.$('input[type="submit"], button[type="submit"], button:has-text("أضف"), input[value*="أضف"]');
         if (submitBtn) {
+          db.addLog('info', 'automation', `Clicking Khamsat reply submit button...`);
           await submitBtn.click();
-          await page.waitForTimeout(2000);
-          detailsStr = 'Textarea filled and submit button clicked automatically via Playwright persistent browser!';
+          await page.waitForTimeout(4000);
+          await takeScreenshot('3. Post Submission Page State');
+          detailsStr = 'Textarea filled and submit button clicked automatically!';
         } else {
+          db.addLog('info', 'automation', `Submit button query empty. Dispatching Enter key...`);
           await textarea.press('Enter');
+          await page.waitForTimeout(4000);
+          await takeScreenshot('3. Post Submission (Enter Dispatched)');
           detailsStr = 'Textarea filled and Enter key pressed!';
         }
       } else {
@@ -697,22 +759,37 @@ export async function submitProposalViaPlaywright(proposalId: string): Promise<{
         await textarea.fill(prop.content);
         await page.waitForTimeout(500);
 
-        const durationInput = await page.$('input[name="duration"], input#duration, input[type="number"]');
+        // Calculate custom cost & period values based on user definitions
+        const matches = (op.budget || '').match(/\d+/g);
+        const fallbackCost = matches && matches.length > 0 ? parseInt(matches[0], 10) : 25;
+        const bidCost = prop.cost !== undefined ? prop.cost : (op.cost !== undefined ? op.cost : fallbackCost);
+        const bidPeriod = prop.period !== undefined ? prop.period : (op.period !== undefined ? op.period : 10);
+
+        db.addLog('info', 'automation', `Mostaql automatic form filling - price: $${bidCost}, duration: ${bidPeriod} days...`);
+
+        const durationInput = await page.$('#bid__period, input[name="period"], input[name="duration"], input#duration, input[type="number"]');
         if (durationInput) {
-          await durationInput.fill('5').catch(() => {});
+          await durationInput.fill(String(bidPeriod)).catch(() => {});
         }
-        const costInput = await page.$('input[name="cost"], input#cost, input[name="budget"]');
+        const costInput = await page.$('#bid__cost, input[name="cost"], input#cost, input[name="budget"]');
         if (costInput) {
-          await costInput.fill('150').catch(() => {});
+          await costInput.fill(String(bidCost)).catch(() => {});
         }
+
+        await takeScreenshot('2. Proposal and Budget Fields Filled');
 
         const submitBtn = await page.$('button[type="submit"], #submit-btn, button:has-text("أضف"), button:has-text("عفر")');
         if (submitBtn) {
+          db.addLog('info', 'automation', `Clicking Mostaql proposal submit button...`);
           await submitBtn.click();
-          await page.waitForTimeout(2000);
+          await page.waitForTimeout(4500);
+          await takeScreenshot('3. Post Submission Page State');
           detailsStr = 'Mostaql proposal inputs filled and bidding completed automatically!';
         } else {
+          db.addLog('info', 'automation', `Submit button query empty. Dispatching Enter key...`);
           await textarea.press('Enter');
+          await page.waitForTimeout(4500);
+          await takeScreenshot('3. Post Submission (Enter Dispatched)');
           detailsStr = 'Feedback textarea filled and Enter dispatched!';
         }
       } else {
@@ -720,10 +797,12 @@ export async function submitProposalViaPlaywright(proposalId: string): Promise<{
       }
     } else if (platform === 'Fiverr') {
       db.addLog('info', 'automation', `Scanning Fiverr gig opportunities on ${op.link}...`);
-      await page.waitForTimeout(2500);
+      await page.waitForTimeout(1000);
+      await takeScreenshot('Fiverr Opportunity Scanned');
       detailsStr = 'Page scanned and contact flow validated over authenticated Fiverr persistent session.';
     }
 
+    db.updateProposal(proposalId, { submissionError: undefined });
     db.addLog('success', 'automation', `Playwright auto-posting succeeded on ${platform}! ${detailsStr}`);
     return {
       success: true,
@@ -731,6 +810,7 @@ export async function submitProposalViaPlaywright(proposalId: string): Promise<{
       submittedLink: op.link
     };
   } catch (err: any) {
+    db.updateProposal(proposalId, { submissionError: err.message });
     db.addLog('error', 'automation', `Playwright automated submission failed on ${platform}: ${err.message}.`);
     return {
       success: false,
@@ -758,6 +838,7 @@ export async function extractMostaqlOpportunity(page: Page, url: string): Promis
   clientName: string;
   category: string;
   language: 'ar' | 'en';
+  period?: number;
 }> {
   try {
     const mainText = await page.textContent('body').catch(() => '') || '';
@@ -783,13 +864,39 @@ export async function extractMostaqlOpportunity(page: Page, url: string): Promis
       return { valid: false, reason: 'INVALID', title: '', description: '', budget: '', clientName: '', category: '', language: 'ar' };
     }
 
-    const description = await page.$eval('.project-desc, #project-desc, .project-details, .project-description, div.card-body', el => el.textContent?.trim()).catch(() => '') || '';
+    let description = await page.evaluate(() => {
+      // Prioritize the exact project brief element to avoid comments/proposals, attachments, and footer garbage
+      const briefEl = document.querySelector('#project-brief .text-wrapper-div.carda__content') || 
+                      document.querySelector('#project-brief .text-wrapper-div') ||
+                      document.querySelector('#project-brief .carda__content') ||
+                      document.querySelector('#project-brief');
+      return briefEl ? briefEl.textContent?.trim() || '' : '';
+    }).catch(() => '') || '';
+
+    if (!description || description.length < 15) {
+      description = await page.$eval('.project-desc, #project-desc, .project-details, .project-description, div.card-body', el => el.textContent?.trim()).catch(() => '') || '';
+    }
+
     if (!description || description.length < 15) {
       return { valid: false, reason: 'INVALID', title, description: 'No description found', budget: '', clientName: '', category: '', language: 'ar' };
     }
 
     const budget = await page.evaluate(() => {
-      const rows = Array.from(document.querySelectorAll('tr, li, .table-properties td, .properties-list td, td'));
+      const specificSpan = document.querySelector('.meta-row .meta-value[data-type="project-budget_range"] span') ||
+                           document.querySelector('.meta-value[data-type="project-budget_range"] span');
+      if (specificSpan && specificSpan.textContent) {
+        return specificSpan.textContent.trim();
+      }
+      const bVal = document.querySelector('[data-type="project-budget_range"]');
+      if (bVal && bVal.textContent) {
+        return bVal.textContent.trim();
+      }
+      const labelEl = Array.from(document.querySelectorAll('.meta-label')).find(el => el.textContent?.includes('الميزانية'));
+      if (labelEl && labelEl.nextElementSibling) {
+        return labelEl.nextElementSibling.textContent?.trim() || '';
+      }
+
+      const rows = Array.from(document.querySelectorAll('tr, li, .table-properties td, .properties-list td, td, .meta-row'));
       for (const r of rows) {
         const text = r.textContent || '';
         if (text.includes('الميزانية') || text.includes('Budget')) {
@@ -799,8 +906,33 @@ export async function extractMostaqlOpportunity(page: Page, url: string): Promis
       return '$100 - $250';
     });
 
-    const clientName = await page.$eval('.user-card .meta-owner a, a[href*="/u/"], .username', el => el.textContent?.trim()).catch(() => '') || 'Mostaql Client';
+    const clientName = await page.evaluate(() => {
+      const bdi = document.querySelector('.profile-details .profile__name bdi') || 
+                  document.querySelector('.profile__name bdi') ||
+                  document.querySelector('.profile-details h5 bdi') ||
+                  document.querySelector('.profile-details .profile__name');
+      return bdi ? bdi.textContent?.trim() || '' : '';
+    }).catch(() => '') || 
+    await page.$eval('.user-card .meta-owner a, a[href*="/u/"], .username', el => el.textContent?.trim()).catch(() => '') || 
+    'Mostaql Client';
+
     const category = await page.$eval('.project-meta, td:has-text("القسم"), .meta-item', el => el.textContent?.trim()).catch(() => '') || 'Programming & Development';
+
+    const period = await page.evaluate(() => {
+      const metaRows = Array.from(document.querySelectorAll('.meta-row'));
+      for (const row of metaRows) {
+        const label = row.querySelector('.meta-label')?.textContent || '';
+        if (label.includes('مدة التنفيذ') || label.includes('Execution period') || label.includes('المدة')) {
+          const valEl = row.querySelector('.meta-value');
+          if (valEl) {
+            const txt = valEl.textContent?.trim() || '';
+            const match = txt.match(/\d+/);
+            if (match) return parseInt(match[0], 10);
+          }
+        }
+      }
+      return 15;
+    }).catch(() => 15);
 
     return {
       valid: true,
@@ -810,7 +942,8 @@ export async function extractMostaqlOpportunity(page: Page, url: string): Promis
       budget,
       clientName,
       category,
-      language: 'ar'
+      language: 'ar',
+      period
     };
   } catch (err: any) {
     return { valid: false, reason: 'INVALID', title: '', description: '', budget: '', clientName: '', category: '', language: 'ar' };
@@ -1041,7 +1174,8 @@ export async function validateOpportunity(
   platform: 'Khamsat' | 'Mostaql' | 'Fiverr',
   url: string,
   existingPage?: Page,
-  expectedTitle?: string
+  expectedTitle?: string,
+  boardData?: BoardData
 ): Promise<{ valid: boolean; reason: string | null; canonicalUrl?: string; additionalData?: any }> {
   const lowerUrl = url.toLowerCase();
   
@@ -1102,255 +1236,17 @@ export async function validateOpportunity(
       page = pages.length > 0 ? pages[0] : await localContext.newPage();
     }
 
-    db.addLog('info', 'scraper', `[VALIDATOR] Requesting validation check on: ${url}`);
+    db.addLog('info', 'scraper', `[VALIDATOR] Routing request to Universal URL Resolver for: ${url}`);
+    const resolved = await resolveAndValidateUrl(platform, url, page, expectedTitle, boardData);
     
-    // Attempt navigation
-    const response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 35000 });
-    await page.waitForTimeout(2000);
-
-    const httpStatus = response ? response.status() : 200;
-    if (httpStatus === 404) {
-      db.addLog('warning', 'scraper', `[VALIDATOR REJECT] Status response returned 404 for ${url}`);
-      return { valid: false, reason: 'DELETED' };
-    }
-
-    const finalUrl = page.url();
-    const lowerFinal = finalUrl.toLowerCase();
-
-    // Check login-wall / homepage redirects
-    if (platform === 'Mostaql') {
-      if (lowerFinal.endsWith('mostaql.com/') || lowerFinal.endsWith('mostaql.com/projects') || lowerFinal.includes('/login') || lowerFinal.includes('/register') || lowerFinal.includes('accounts.hsoub.com')) {
-        const userMenu = await page.$('a[href*="/u/"], .user-menu, a[href*="/logout"], img.avatar, .avatar');
-        if (!userMenu) {
-          db.updateAccount(platform, { status: 'EXPIRED', errorMessage: 'Interactive session expired. Access boundaries blocked.' });
-          db.addLog('warning', 'scraper', `[VALIDATOR] Mostaql session expired or disconnected. Cookie check failed.`);
-          return { valid: false, reason: 'SESSION_EXPIRED' };
-        }
-        return { valid: false, reason: 'PRIVATE' };
-      }
-    } else if (platform === 'Khamsat') {
-      if (lowerFinal.endsWith('khamsat.com/') || lowerFinal.endsWith('khamsat.com/community/requests') || lowerFinal.includes('/login') || lowerFinal.includes('/signin') || lowerFinal.includes('accounts.hsoub.com')) {
-        const userMenu = await page.$('a[href*="/user/"], .user-menu, a[href*="/logout"], .avatar, .nav-user');
-        if (!userMenu) {
-          db.updateAccount(platform, { status: 'EXPIRED', errorMessage: 'Interactive session expired. Access boundaries blocked.' });
-          db.addLog('warning', 'scraper', `[VALIDATOR] Khamsat session expired or disconnected. Cookie check failed.`);
-          return { valid: false, reason: 'SESSION_EXPIRED' };
-        }
-        return { valid: false, reason: 'PRIVATE' };
-      }
-    } else if (platform === 'Fiverr') {
-      if (lowerFinal.endsWith('fiverr.com/') || lowerFinal.includes('/login') || lowerFinal.includes('/join') || lowerFinal.includes('/categories')) {
-        const userMenu = await page.$('.logged-in, .user-avatar, a[href*="/logout"], img[src*="user_image"]');
-        if (!userMenu) {
-          db.updateAccount(platform, { status: 'EXPIRED', errorMessage: 'Interactive session expired. Access boundaries blocked.' });
-          db.addLog('warning', 'scraper', `[VALIDATOR] Fiverr session expired or disconnected. Cookie check failed.`);
-          return { valid: false, reason: 'SESSION_EXPIRED' };
-        }
-        return { valid: false, reason: 'UNAVAILABLE' };
-      }
-    }
-
-    // Khamsat Custom Validation logic
-    if (platform === 'Khamsat') {
-      const originalServiceId = extractKhamsatId(url);
-      const finalServiceId = extractKhamsatId(finalUrl);
-      const redirectDetected = (url !== finalUrl) || (originalServiceId !== finalServiceId);
-
-      // 1. Service ID block or URL redirect check
-      if (redirectDetected && originalServiceId && finalServiceId && originalServiceId !== finalServiceId) {
-        db.addLog('warning', 'scraper', `[VALIDATOR REJECT] Khamsat redirect detected. Original: ${url} (Service ID: ${originalServiceId}) redirected to: ${finalUrl} (Service ID: ${finalServiceId})`);
-        return {
-          valid: false,
-          reason: 'REDIRECTED',
-          canonicalUrl: finalUrl,
-          additionalData: {
-            status: 'REDIRECTED',
-            redirectDetected: true,
-            validationStatus: 'INVALID',
-            serviceId: originalServiceId,
-            finalServiceId: finalServiceId,
-            validationReason: 'SERVICE_REDIRECTED',
-            originalUrl: url,
-            finalUrl: finalUrl,
-            lastValidatedAt: new Date().toISOString()
-          }
-        };
-      }
-
-      // 1b. Validate Title Match Similarity
-      if (expectedTitle) {
-        const openedTitle = await page.evaluate(() => {
-          const el = document.querySelector('h1, .service-title, .topic-title, .post-title, h2');
-          return el?.textContent?.trim() || '';
-        });
-        if (openedTitle && !isTitleSimilar(expectedTitle, openedTitle)) {
-          db.addLog('warning', 'scraper', `[VALIDATOR REJECT] Khamsat title mismatch. Expected: "${expectedTitle}" but page opened to: "${openedTitle}" on ${url}`);
-          return {
-            valid: false,
-            reason: 'TITLE_MISMATCH',
-            canonicalUrl: finalUrl,
-            additionalData: {
-              status: 'INVALID',
-              redirectDetected: redirectDetected,
-              validationStatus: 'INVALID',
-              serviceId: originalServiceId || '',
-              finalServiceId: finalServiceId || '',
-              validationReason: 'TITLE_MISMATCH',
-              originalUrl: url,
-              finalUrl: finalUrl,
-              lastValidatedAt: new Date().toISOString()
-            }
-          };
-        }
-      }
-
-      // 2. Invalid Page Detection
-      const isInvalidPage = await page.evaluate(() => {
-        const text = (document.body.textContent || '').toLowerCase();
-        const title = (document.title || '').toLowerCase();
-        
-        const invalidPhrases = [
-          'الخدمة غير موجودة',
-          'الخدمة غير متوفرة',
-          'تم حذف الخدمة',
-          '404',
-          'page not found',
-          'service unavailable'
-        ];
-        
-        return invalidPhrases.some(phrase => text.includes(phrase) || title.includes(phrase));
-      });
-
-      if (isInvalidPage) {
-        db.addLog('warning', 'scraper', `[VALIDATOR REJECT] Khamsat page invalid/unavailable match on: ${url}`);
-        return {
-          valid: false,
-          reason: 'INVALID',
-          canonicalUrl: finalUrl,
-          additionalData: {
-            status: 'INVALID',
-            redirectDetected: redirectDetected,
-            validationStatus: 'INVALID',
-            serviceId: originalServiceId || '',
-            finalServiceId: finalServiceId || '',
-            validationReason: 'INVALID_PAGE_CONTENT',
-            originalUrl: url,
-            finalUrl: finalUrl,
-            lastValidatedAt: new Date().toISOString()
-          }
-        };
-      }
-
-      // 3. Service Existence Check
-      const titleExists = await page.evaluate(() => {
-        const el = document.querySelector('h1, .service-title, .topic-title, .post-title, h2');
-        return !!(el && el.textContent && el.textContent.trim().length >= 4);
-      });
-
-      const descriptionExists = await page.evaluate(() => {
-        const el = document.querySelector('.post-content, .service-desc, .topic-desc, .details, #project-desc');
-        return !!(el && el.textContent && el.textContent.trim().length >= 15);
-      });
-
-      const ownerExists = await page.evaluate(() => {
-        const el = document.querySelector('.post-user a, a[href*="/user/"], .user-card a[href*="/u/"], .username, .meta-owner a');
-        return !!(el && el.textContent && el.textContent.trim().length > 0);
-      });
-
-      const pricingExists = await page.evaluate(() => {
-        const hasPriceSelector = !document.querySelector('.price, .service-price, .package-price, [class*="price"], td:has-text("الميزانية")');
-        const bodyText = document.body.textContent || '';
-        const hasPriceText = /(?:الميزانية|الميزانيه|المبلغ|السعر|بميزانية|بميزانيه|بحدود|السعر يبدأ من)\s*[:=]?\s*\$?\s*(\d+)/i.test(bodyText);
-        const generalCurrency = bodyText.includes('$') || bodyText.includes('دولار') || bodyText.includes('USD');
-        return hasPriceSelector || hasPriceText || generalCurrency;
-      });
-
-      if (!titleExists || !descriptionExists || !ownerExists || !pricingExists) {
-        const missing = [];
-        if (!titleExists) missing.push('title');
-        if (!descriptionExists) missing.push('description');
-        if (!ownerExists) missing.push('owner');
-        if (!pricingExists) missing.push('pricing');
-        
-        db.addLog('warning', 'scraper', `[VALIDATOR REJECT] Khamsat content exists validation failed: missing ${missing.join(', ')} on url ${url}`);
-        return {
-          valid: false,
-          reason: 'INVALID',
-          canonicalUrl: finalUrl,
-          additionalData: {
-            status: 'INVALID',
-            redirectDetected: redirectDetected,
-            validationStatus: 'INVALID',
-            serviceId: originalServiceId || '',
-            finalServiceId: finalServiceId || '',
-            validationReason: `MISSING_CONTENT_${missing.join('_').toUpperCase()}`,
-            originalUrl: url,
-            finalUrl: finalUrl,
-            lastValidatedAt: new Date().toISOString()
-          }
-        };
-      }
-    }
-
-    // Capture Canonical URL
-    let canonicalUrl = await page.$eval('link[rel="canonical"]', el => el.getAttribute('href')).catch(() => null);
-    if (!canonicalUrl) {
-      canonicalUrl = finalUrl;
-    }
-    if (canonicalUrl) {
-      try {
-        const parsedCan = new URL(canonicalUrl);
-        parsedCan.search = ''; // Drop tracking parameters
-        canonicalUrl = parsedCan.toString();
-      } catch (e) {
-        canonicalUrl = finalUrl;
-      }
-    } else {
-      canonicalUrl = finalUrl;
-    }
-
-    if (platform === 'Mostaql') {
-      const details = await extractMostaqlOpportunity(page, canonicalUrl);
-      if (!details.valid) {
-        return { valid: false, reason: details.reason };
-      }
-      return { valid: true, reason: null, canonicalUrl, additionalData: details };
-    } else if (platform === 'Khamsat') {
-      const details = await extractKhamsatOpportunity(page, canonicalUrl);
-      if (!details.valid) {
-        return { valid: false, reason: details.reason };
-      }
-      const originalServiceId = extractKhamsatId(url) || '';
-      const finalServiceId = extractKhamsatId(canonicalUrl) || originalServiceId;
-      const redirectDetected = (url !== canonicalUrl) || (originalServiceId !== finalServiceId);
-      
-      db.addLog('success', 'scraper', `[VALIDATOR SUCCESS] Khamsat opportunity verified as active & accessible: serviceId ${originalServiceId}`);
-
-      return {
-        valid: true,
-        reason: null,
-        canonicalUrl,
-        additionalData: {
-          ...details,
-          status: 'ACTIVE',
-          redirectDetected,
-          validationStatus: 'VALID',
-          serviceId: originalServiceId,
-          finalServiceId: finalServiceId,
-          originalUrl: url,
-          finalUrl: canonicalUrl,
-          lastValidatedAt: new Date().toISOString()
-        }
-      };
-    } else {
-      const details = await extractFiverrOpportunity(page, canonicalUrl);
-      if (!details.valid) {
-        return { valid: false, reason: details.reason };
-      }
-      return { valid: true, reason: null, canonicalUrl, additionalData: details };
-    }
+    return {
+      valid: resolved.validationStatus === 'VALID' && resolved.healthScore >= 80,
+      reason: resolved.validationReason,
+      canonicalUrl: resolved.canonicalUrl,
+      additionalData: resolved
+    };
   } catch (err: any) {
-    db.addLog('warning', 'scraper', `[VALIDATOR FAIL] exception checking opportunity link: ${err.message}`);
+    db.addLog('error', 'scraper', `[VALIDATOR FAIL] Exception checking opportunity link: ${err.message}`);
     return { valid: false, reason: 'INVALID_PAGE' };
   } finally {
     if (localContext) {
@@ -1376,115 +1272,234 @@ export async function scrapePlatformJobsPlaywright(platform: 'Khamsat' | 'Mostaq
     const pages = context.pages();
     const page = pages.length > 0 ? pages[0] : await context.newPage();
 
-    let scrapeUrl = '';
-    if (platform === 'Khamsat') {
-      scrapeUrl = 'https://khamsat.com/community/requests';
-    } else if (platform === 'Mostaql') {
-      scrapeUrl = 'https://mostaql.com/projects';
-    } else if (platform === 'Fiverr') {
-      const keyword = (skills && skills.length > 0) ? skills[0] : 'Web Development';
-      scrapeUrl = `https://www.fiverr.com/search/gigs?query=${encodeURIComponent(keyword)}`;
-    }
+    // Define multi-URL target discovery queues based on platform and portfolio skills
+    const targetUrls: string[] = [];
+    const activeSkills = skills && skills.length > 0 ? skills : ['React', 'TypeScript', 'Node.js', 'AI', 'Telegram Bots'];
 
-    db.addLog('info', 'scraper', `[SCRAPER] Loading search listing for ${platform}: ${scrapeUrl}`);
-    await page.goto(scrapeUrl, { waitUntil: 'domcontentloaded', timeout: 35000 });
-    await page.waitForTimeout(2000);
-
-    let candidates: { url: string; expectedTitle?: string }[] = [];
     if (platform === 'Khamsat') {
-      candidates = await page.evaluate(() => {
-        const anchors = Array.from(document.querySelectorAll('a'));
-        const list: { url: string; expectedTitle?: string }[] = [];
-        const seen = new Set<string>();
-        for (const a of anchors) {
-          const href = a.href || '';
-          if (href.includes('/community/requests/') && href.match(/\/community\/requests\/\d+/)) {
-            const cleanUrl = href.split('?')[0];
-            if (!seen.has(cleanUrl)) {
-              seen.add(cleanUrl);
-              list.push({
-                url: cleanUrl,
-                expectedTitle: a.textContent?.trim() || ''
-              });
-            }
-          }
-        }
-        return list;
+      targetUrls.push('https://khamsat.com/community/requests');
+      targetUrls.push('https://khamsat.com/community/requests?page=2');
+      activeSkills.slice(0, 3).forEach(skill => {
+        targetUrls.push(`https://khamsat.com/community/requests?q=${encodeURIComponent(skill)}`);
       });
     } else if (platform === 'Mostaql') {
-      candidates = await page.evaluate(() => {
-        const anchors = Array.from(document.querySelectorAll('a'));
-        const list: { url: string; expectedTitle?: string }[] = [];
-        const seen = new Set<string>();
-        for (const a of anchors) {
-          const href = a.href || '';
-          if (href.includes('/project/') && href.match(/\/project\/\d+/)) {
-            const cleanUrl = href.split('?')[0];
-            if (!seen.has(cleanUrl)) {
-              seen.add(cleanUrl);
-              list.push({
-                url: cleanUrl,
-                expectedTitle: a.textContent?.trim() || ''
-              });
-            }
-          }
-        }
-        return list;
+      targetUrls.push('https://mostaql.com/projects?category=development&sort=latest');
+      targetUrls.push('https://mostaql.com/projects?category=development&sort=latest&page=2');
+      activeSkills.slice(0, 3).forEach(skill => {
+        targetUrls.push(`https://mostaql.com/projects?keyword=${encodeURIComponent(skill)}&sort=latest`);
       });
     } else if (platform === 'Fiverr') {
-      candidates = await page.evaluate(() => {
-        const anchors = Array.from(document.querySelectorAll('a'));
-        const list: { url: string; expectedTitle?: string }[] = [];
-        const seen = new Set<string>();
-        for (const a of anchors) {
-          const href = a.href || '';
-          const isGig = href.includes('/gigs/') || href.includes('/services/') || href.match(/fiverr\.com\/[a-zA-Z0-9_\-]+\/[a-zA-Z0-9_\-]+/);
-          if (isGig && !href.includes('/search/') && !href.includes('/categories/') && !href.includes('/support') && !href.includes('/users/') && !href.includes('/profile/') && !seen.has(href)) {
-            const cleanUrl = href.split('?')[0];
-            if (!seen.has(cleanUrl)) {
-              seen.add(cleanUrl);
-              list.push({
-                url: cleanUrl,
-                expectedTitle: a.textContent?.trim() || ''
-              });
-            }
-          }
-        }
-        return list;
-      });
+      targetUrls.push(`https://www.fiverr.com/search/gigs?query=Web%20Development`);
+      if (activeSkills.length > 0) {
+        targetUrls.push(`https://www.fiverr.com/search/gigs?query=${encodeURIComponent(activeSkills[0])}`);
+      }
     }
 
-    db.addLog('info', 'scraper', `[SCRAPER] Extracted ${candidates.length} candidate URLs. Starting item openings and deep checks.`);
+    db.addLog('info', 'scraper', `[SCRAPER] Initiating multi-URL target discovery scan on ${platform} across ${targetUrls.length} pages.`);
 
-    const maxToVerify = Math.min(candidates.length, 5);
-    const selected = candidates.slice(0, maxToVerify);
+    let candidates: {
+      url: string;
+      expectedTitle?: string;
+      boardTitle?: string;
+      boardSnippet?: string;
+      boardCategory?: string;
+      boardRequestId?: string;
+      boardUrl?: string;
+    }[] = [];
+    
+    // Deduplication set for URLs
+    const seenUrls = new Set<string>();
+
+    for (const scrapeUrl of targetUrls) {
+      try {
+        db.addLog('info', 'scraper', `[SCRAPER Scan] Crawling listing: ${scrapeUrl}`);
+        await page.goto(scrapeUrl, { waitUntil: 'domcontentloaded', timeout: 35000 });
+        await page.waitForTimeout(1500);
+
+        let subCandidates: typeof candidates = [];
+
+        if (platform === 'Khamsat') {
+          subCandidates = await page.evaluate(() => {
+            const anchors = Array.from(document.querySelectorAll('a'));
+            const list: any[] = [];
+            const seen = new Set<string>();
+            for (const a of anchors) {
+              const href = a.href || '';
+              if (href.includes('/community/requests/') && href.match(/\/community\/requests\/\d+/)) {
+                const cleanUrl = href.split('?')[0];
+                if (!seen.has(cleanUrl)) {
+                  seen.add(cleanUrl);
+                  
+                  const boardTitle = a.textContent?.trim() || '';
+                  const matchId = cleanUrl.match(/\/community\/requests\/(\d+)/i);
+                  const boardRequestId = matchId ? matchId[1] : '';
+                  
+                  const container = a.closest('tr') || a.closest('li') || a.closest('.posts-row') || a.closest('div');
+                  let boardCategory = '';
+                  let boardSnippet = '';
+                  
+                  if (container) {
+                    const categoryAnchor = container.querySelector('a[href*="/community/requests-"]');
+                    if (categoryAnchor) {
+                      boardCategory = categoryAnchor.textContent?.trim() || '';
+                    }
+                    
+                    const snippetElement = container.querySelector('p, .snippet, .excerpt, .post-desc, .text-muted');
+                    if (snippetElement && snippetElement !== a && snippetElement !== categoryAnchor) {
+                      boardSnippet = snippetElement.textContent?.trim() || '';
+                    }
+                  }
+                  
+                  boardSnippet = boardSnippet.substring(0, 300).trim();
+                  if (!boardSnippet) {
+                    boardSnippet = boardTitle;
+                  }
+                  
+                  list.push({
+                    url: cleanUrl,
+                    expectedTitle: boardTitle,
+                    boardTitle,
+                    boardSnippet,
+                    boardCategory,
+                    boardRequestId,
+                    boardUrl: cleanUrl
+                  });
+                }
+              }
+            }
+            return list;
+          });
+        } else if (platform === 'Mostaql') {
+          subCandidates = await page.evaluate(() => {
+            const anchors = Array.from(document.querySelectorAll('a'));
+            const list: any[] = [];
+            const seen = new Set<string>();
+            for (const a of anchors) {
+              const href = a.href || '';
+              if (href.includes('/project/') && href.match(/\/project\/\d+/)) {
+                const cleanUrl = href.split('?')[0];
+                if (!seen.has(cleanUrl)) {
+                  seen.add(cleanUrl);
+                  list.push({
+                    url: cleanUrl,
+                    expectedTitle: a.textContent?.trim() || ''
+                  });
+                }
+              }
+            }
+            return list;
+          });
+        } else if (platform === 'Fiverr') {
+          subCandidates = await page.evaluate(() => {
+            const anchors = Array.from(document.querySelectorAll('a'));
+            const list: any[] = [];
+            const seen = new Set<string>();
+            for (const a of anchors) {
+              const href = a.href || '';
+              const isGig = href.includes('/gigs/') || href.includes('/services/') || href.match(/fiverr\.com\/[a-zA-Z0-9_\-]+\/[a-zA-Z0-9_\-]+/);
+              if (isGig && !href.includes('/search/') && !href.includes('/categories/') && !href.includes('/support') && !href.includes('/users/') && !href.includes('/profile/') && !seen.has(href)) {
+                const cleanUrl = href.split('?')[0];
+                if (!seen.has(cleanUrl)) {
+                  seen.add(cleanUrl);
+                  list.push({
+                    url: cleanUrl,
+                    expectedTitle: a.textContent?.trim() || ''
+                  });
+                }
+              }
+            }
+            return list;
+          });
+        }
+
+        for (const item of subCandidates) {
+          if (!seenUrls.has(item.url)) {
+            seenUrls.add(item.url);
+            candidates.push(item);
+          }
+        }
+      } catch (err: any) {
+        db.addLog('warning', 'scraper', `[SCRAPER Error] Failed to scan sub URL ${scrapeUrl}: ${err.message}`);
+      }
+    }
+
+    db.addLog('info', 'scraper', `[SCRAPER] Extracted a total of ${candidates.length} unique candidate URLs across platforms.`);
+    
+    // Save discovery count to analytics
+    recordDiscovery(platform, { candidatesDiscovered: candidates.length });
+
+    // Stage 3: Prioritize and filter by profile skills or keyword overlap
+    const prioritizedCandidates = candidates.map(cand => {
+      const title = (cand.expectedTitle || cand.boardTitle || '').toLowerCase();
+      const snippet = (cand.boardSnippet || '').toLowerCase();
+      
+      let isHighPriority = false;
+      let matchedSkillName = '';
+
+      for (const skill of activeSkills) {
+        const skillLower = skill.toLowerCase();
+        if (title.includes(skillLower) || snippet.includes(skillLower)) {
+          isHighPriority = true;
+          matchedSkillName = skill;
+          break;
+        }
+      }
+
+      // Check common tech keywords to avoid logo/translate junk
+      const techKeywords = ['برمج', 'تطوير', 'ويب', 'تطبيق', 'موقع', 'كود', 'react', 'next.js', 'typescript', 'node', 'server', 'api'];
+      if (!isHighPriority) {
+        for (const word of techKeywords) {
+          if (title.includes(word) || snippet.includes(word)) {
+            isHighPriority = true;
+            matchedSkillName = word;
+            break;
+          }
+        }
+      }
+
+      return {
+        ...cand,
+        isHighPriority,
+        matchedSkillName
+      };
+    });
+
+    // Sort: High priority items go first
+    prioritizedCandidates.sort((a, b) => (b.isHighPriority ? 1 : 0) - (a.isHighPriority ? 1 : 0));
+
+    // Limit deep checks to 15-20 candidates to keep crawl times within reasonable limits
+    const maxToVerify = Math.min(prioritizedCandidates.length, 20);
+    const selected = prioritizedCandidates.slice(0, maxToVerify);
+
+    db.addLog('info', 'scraper', `[SCRAPER Pipeline] Selected top ${selected.length} prioritized candidates for deep page validation.`);
 
     for (const cand of selected) {
-      db.addLog('info', 'scraper', `[SCRAPER CHK] Visiting candidate URL: ${cand.url}`);
-      const valResponse = await validateOpportunity(platform, cand.url, page, cand.expectedTitle);
+      db.addLog('info', 'scraper', `[SCRAPER CHK] Visiting candidate URL: ${cand.url} (Matched tag: ${cand.matchedSkillName || 'General Development'})`);
+      const valResponse = await validateOpportunity(platform, cand.url, page, cand.expectedTitle || cand.boardTitle, cand);
       
       if (valResponse.valid && valResponse.additionalData) {
         const details = valResponse.additionalData;
 
-        // Ensure we do not scrape/add duplicates for the same project matching title, category, description prefix and publisher (clientName)
+        // Duplicate check
         const isDuplicate = db.getOpportunities().some(o => 
           o.platform === platform &&
           o.title.trim().toLowerCase() === details.title.trim().toLowerCase() &&
-          o.category.trim().toLowerCase() === details.category.trim().toLowerCase() &&
           o.clientName.trim().toLowerCase() === details.clientName.trim().toLowerCase() &&
-          o.description.trim().toLowerCase().substring(0, 200) === details.description.trim().toLowerCase().substring(0, 200)
+          o.description.trim().toLowerCase().substring(0, 150) === details.description.trim().toLowerCase().substring(0, 150)
         );
 
         if (isDuplicate) {
-          db.addLog('info', 'scraper', `[SCRAPER Skip DUP] Candidate ${cand.url} is a duplicate of a saved project with matching title, category, publisher, and description.`);
+          db.addLog('info', 'scraper', `[SCRAPER Skip DUP] Candidate ${cand.url} is already registered in DB.`);
           continue;
         }
+
+        const isHighMatch = (cand.isHighPriority || details.title.toLowerCase().includes('react') || details.title.toLowerCase().includes('node'));
 
         scrapedJobs.push({
           title: details.title,
           link: valResponse.canonicalUrl || cand.url,
           canonicalUrl: valResponse.canonicalUrl || cand.url,
-          description: details.description.substring(0, 500),
+          description: platform === 'Mostaql' ? details.description : details.description.substring(0, 500),
           clientName: details.clientName,
           budget: details.budget,
           category: details.category,
@@ -1499,15 +1514,68 @@ export async function scrapePlatformJobsPlaywright(platform: 'Khamsat' | 'Mostaq
           finalUrl: details.finalUrl || valResponse.canonicalUrl || cand.url,
           serviceId: details.serviceId || '',
           finalServiceId: details.finalServiceId || '',
-          redirectDetected: details.redirectDetected || false
+          redirectDetected: details.redirectDetected || false,
+          sourceType: 'REAL',
+          
+          pageType: details.pageType,
+          platformId: details.platformId,
+          canApply: details.canApply,
+          redirectChain: details.redirectChain,
+          healthScore: details.healthScore,
+          debugScreenshotPath: details.debugScreenshotPath,
+          pageTitle: details.pageTitle,
+          pageContentSnippet: details.pageContentSnippet,
+          
+          boardTitle: details.boardTitle,
+          boardSnippet: details.boardSnippet,
+          boardCategory: details.boardCategory,
+          liveTitle: details.liveTitle,
+          liveCategory: details.liveCategory,
+          titleSimilarity: details.titleSimilarity,
+          descriptionSimilarity: details.descriptionSimilarity,
+          semanticValidation: details.semanticValidation,
+          semanticValidationReason: details.semanticValidationReason
         });
+
+        // Record a successful real discovery
+        recordDiscovery(platform, {
+          passed: true,
+          isReal: true,
+          highMatch: isHighMatch,
+          proposalCapable: details.canApply ?? true,
+          skillMatched: cand.matchedSkillName || 'Development'
+        });
+
       } else {
-        db.addLog('warning', 'scraper', `[SCRAPER SKIP] Rejected candidate ${cand.url}. Reason: ${valResponse.reason || 'FAILED'}`);
+        const failReason = (valResponse.reason || 'INVALID_PAGE') as any;
+        db.addLog('warning', 'scraper', `[SCRAPER SKIP] Rejected candidate ${cand.url}. Reason: ${failReason}`);
+        
+        // Record failure context for scraper analytics tracking
+        const reasonMapping: Record<string, 'REDIRECT' | 'CLOSED' | 'DELETED' | 'PRIVATE' | 'CONTENT_MISMATCH' | 'CANNOT_APPLY' | 'SOFT_INVALID'> = {
+          'REDIRECTED': 'REDIRECT',
+          'REDIRECT': 'REDIRECT',
+          'CLOSED': 'CLOSED',
+          'DELETED': 'DELETED',
+          'PRIVATE': 'PRIVATE',
+          'CONTENT_MISMATCH': 'CONTENT_MISMATCH',
+          'CANNOT_APPLY': 'CANNOT_APPLY',
+          'SOFT_INVALID': 'SOFT_INVALID',
+          'RATE_LIMIT': 'SOFT_INVALID',
+          'TIMEOUT': 'SOFT_INVALID'
+        };
+
+        const mappedReason = reasonMapping[failReason] || 'CONTENT_MISMATCH';
+
+        recordDiscovery(platform, {
+          passed: false,
+          reason: mappedReason,
+          isReal: true
+        });
       }
     }
 
     if (scrapedJobs.length > 0) {
-      db.addLog('success', 'scraper', `[SCRAPER SUCCESS] Added ${scrapedJobs.length} real active jobs to queue.`);
+      db.addLog('success', 'scraper', `[SCRAPER SUCCESS] Added ${scrapedJobs.length} top-quality REAL opportunities to queue.`);
     }
   } catch (err: any) {
     db.addLog('warning', 'scraper', `Playwright background crawler check aborted: ${err.message}`);
@@ -1643,13 +1711,24 @@ export async function importCookiesToPlatform(
     }
 
     if (authenticated) {
+      let cookiesJson: string | undefined = undefined;
+      try {
+        const cookiesList = await context.cookies();
+        if (cookiesList && cookiesList.length > 0) {
+          cookiesJson = JSON.stringify(cookiesList);
+        }
+      } catch (cookieErr: any) {
+        console.error('Failed to dump cookies in importCookiesToPlatform:', cookieErr);
+      }
+
       db.updateAccount(platform, {
         status: 'CONNECTED',
         username: username || 'Imported User Profile',
         lastLogin: new Date().toISOString(),
         lastValidation: new Date().toISOString(),
         profileLocation: profileDir,
-        errorMessage: undefined
+        errorMessage: undefined,
+        cookiesJson
       });
       db.addLog('success', 'automation', `Manually imported sessions cookies verified successfully for ${platform}! (@${username || 'active_user'})`);
       return { success: true, username };

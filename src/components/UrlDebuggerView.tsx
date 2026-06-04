@@ -184,10 +184,10 @@ export default function UrlDebuggerView({
   // Helper to diagnose specific failure reasons and provide helpful operator tips
   const getTroubleshootingAdvice = (failedStep: DiagnosticStep): string => {
     if (failedStep.name.includes('Detect Platform')) {
-      return "The URL provided does not match our supported scrapers. Make sure the domain contains 'mostaql.com', 'khamsat.com', or 'fiverr.com'. Shared links must target supported freelance channels, not external blogs or project templates.";
+      return "The URL provided does not match our supported scrapers. Make sure the domain contains 'mostaql.com' or 'khamsat.com'. Shared links must target supported freelance channels, not external blogs or project templates.";
     }
     if (failedStep.name.includes('Routing Pattern Check')) {
-      return "Mostaql project pages require specific structures: e.g. 'https://mostaql.com/project/12345-title'. Khamsat requires service pages ('/service/123') or request pages ('/community/requests/123'). Fiverr blocks inbox threads or meta-search routes. Double check the URL structure.";
+      return "Mostaql project pages require specific structures: e.g. 'https://mostaql.com/project/12345-title'. Khamsat requires service pages ('/service/123') or request pages ('/community/requests/123'). Double check the URL structure.";
     }
     if (failedStep.name.includes('Browsing Session')) {
       return "Playwright got redirected to a login wall or homepage, or returned 404. Go to 'Platform Accounts' of your system dashboard, ensure you have input correct, unexpired login credentials, and test logging into the target account. If the platform has strong bot-protection (Cloudflare), we recommend re-saving settings to reset the browser cache.";
@@ -307,8 +307,81 @@ export default function UrlDebuggerView({
                             <p className="text-[10px] font-sans text-slate-300 leading-relaxed font-normal">{step.message}</p>
                             
                             {/* Inner step metadata payloads */}
+                            {step.data && step.data.titleSimilarity !== undefined && (
+                              <div className="mt-3 space-y-3 p-4 bg-rose-950/10 border border-rose-900/30 rounded text-xs text-slate-305 font-sans">
+                                <h5 className="font-mono font-bold uppercase tracking-wider text-[10px] text-rose-450 flex items-center gap-1.5">
+                                  <ShieldAlert size={12} />
+                                  Semantic Similarity Analytics: CONTENT MISMATCH
+                                </h5>
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                  <div className="bg-black/60 p-2.5 rounded border border-rose-950/45 text-center">
+                                    <span className="block text-[9px] uppercase tracking-wider text-slate-500 font-mono mb-1">Title Similarity</span>
+                                    <span className={`text-sm font-black ${step.data.titleSimilarity >= 70 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                      {step.data.titleSimilarity}%
+                                    </span>
+                                    <span className="block text-[8px] text-slate-550 mt-0.5 font-mono">(Pass: 70%+)</span>
+                                  </div>
+                                  <div className="bg-black/60 p-2.5 rounded border border-rose-950/45 text-center">
+                                    <span className="block text-[9px] uppercase tracking-wider text-slate-500 font-mono mb-1">Desc Similarity</span>
+                                    <span className={`text-sm font-black ${step.data.descriptionSimilarity >= 60 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                      {step.data.descriptionSimilarity}%
+                                    </span>
+                                    <span className="block text-[8px] text-slate-550 mt-0.5 font-mono">(Pass: 60%+)</span>
+                                  </div>
+                                  <div className="bg-black/60 p-2.5 rounded border border-rose-950/45 text-center">
+                                    <span className="block text-[9px] uppercase tracking-wider text-slate-500 font-mono mb-1">Category match</span>
+                                    <span className={`text-sm font-black uppercase tracking-wider ${step.data.categoryMatch ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                      {step.data.categoryMatch ? 'Match' : 'Mismatch'}
+                                    </span>
+                                    <span className="block text-[8px] text-slate-550 mt-0.5 font-mono">(Required: Yes)</span>
+                                  </div>
+                                </div>
+                                <div className="space-y-2 border-t border-[#1e2235]/40 pt-2.5">
+                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                    <div className="bg-black/40 p-2.5 rounded">
+                                      <strong className="block text-[8px] uppercase tracking-wider text-amber-500 font-mono mb-1">Original Listing Title:</strong>
+                                      <p className="text-[10px] leading-snug leading-relaxed">{step.data.boardTitle}</p>
+                                    </div>
+                                    <div className="bg-black/40 p-2.5 rounded">
+                                      <strong className="block text-[8px] uppercase tracking-wider text-orange-500 font-mono mb-1">Opened Page Title:</strong>
+                                      <p className="text-[10px] leading-snug text-rose-350 leading-relaxed">{step.data.liveTitle}</p>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+
+                            {step.data && step.data.similarityData && (
+                              <div className="mt-3 space-y-3 p-4 bg-emerald-955/10 border border-emerald-900/30 rounded text-xs text-slate-300 font-sans">
+                                <h5 className="font-mono font-bold uppercase tracking-wider text-[10px] text-emerald-400 flex items-center gap-1.5">
+                                  <CheckCircle size={12} />
+                                  Semantic Consistency Verified:
+                                </h5>
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 font-mono">
+                                  <div className="bg-black/60 p-2.5 rounded border border-emerald-950/45 text-center">
+                                    <span className="block text-[9px] uppercase tracking-wider text-slate-500 mb-1">Title Similarity</span>
+                                    <span className="text-sm font-black text-emerald-400">
+                                      {step.data.similarityData.titleSimilarity}%
+                                    </span>
+                                  </div>
+                                  <div className="bg-black/60 p-2.5 rounded border border-emerald-950/45 text-center">
+                                    <span className="block text-[9px] uppercase tracking-wider text-slate-500 mb-1">Desc Similarity</span>
+                                    <span className="text-sm font-black text-emerald-400">
+                                      {step.data.similarityData.descriptionSimilarity}%
+                                    </span>
+                                  </div>
+                                  <div className="bg-black/60 p-2.5 rounded border border-emerald-950/45 text-center">
+                                    <span className="block text-[9px] uppercase tracking-wider text-slate-500 mb-1">Category match</span>
+                                    <span className="text-sm font-black uppercase tracking-wider text-emerald-400">
+                                      Match
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+
                             {step.data && (
-                              <div className="mt-3 p-3 bg-black/45 border border-[#1e2235]/65 rounded text-[10px] text-slate-400 overflow-x-auto select-all">
+                              <div className="mt-3 p-3 bg-black/45 border border-[#1e2235]/65 rounded text-[10px] text-slate-405 overflow-x-auto select-all">
                                 <span className="font-bold text-[#778bc5] text-[9.5px] uppercase block tracking-wider mb-1">Response metadata sub-elements:</span>
                                 <pre className="font-mono leading-relaxed max-h-[160px] overflow-y-auto">{JSON.stringify(step.data, null, 2)}</pre>
                               </div>
@@ -454,14 +527,11 @@ export default function UrlDebuggerView({
             ) : (
               <div className="space-y-1.5 font-mono">
                 {history.map((url, i) => {
-                  let platformLabel = 'Fiverr';
-                  let platColor = 'text-emerald-400 border-emerald-950/45';
+                  let platformLabel = 'Mostaql';
+                  let platColor = 'text-blue-400 border-blue-950/45';
                   if (url.includes('khamsat.com')) {
                     platformLabel = 'Khamsat';
                     platColor = 'text-orange-400 border-orange-950/45';
-                  } else if (url.includes('mostaql.com')) {
-                    platformLabel = 'Mostaql';
-                    platColor = 'text-blue-400 border-blue-950/45';
                   }
 
                   return (

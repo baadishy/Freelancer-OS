@@ -5,6 +5,8 @@
 
 import fs from 'fs';
 import path from 'path';
+import { AsyncLocalStorage } from 'async_hooks';
+export const userSessionStorage = new AsyncLocalStorage<string>();
 import { 
   FreelancerProfile, 
   Opportunity, 
@@ -18,8 +20,22 @@ import {
 const DB_DIR = path.join(process.cwd(), 'data');
 const DB_FILE = path.join(DB_DIR, 'db.json');
 
+// Representation of partition of data for a specific user
+interface UserData {
+  profile: FreelancerProfile;
+  opportunities: Opportunity[];
+  proposals: Proposal[];
+  telegramSettings: TelegramSettings;
+  automationSettings: AutomationSettings;
+  logs: SystemLog[];
+  accounts: ConnectedAccount[];
+}
+
 interface Schema {
   users: Array<{ id: string; email: string; name: string; passwordHash: string; createdAt: string }>;
+  // User-isolated partitions keyed by lower-cased user email
+  userData?: Record<string, UserData>;
+  // Legacy global fallbacks
   profile: FreelancerProfile;
   opportunities: Opportunity[];
   proposals: Proposal[];
@@ -85,6 +101,7 @@ const DEFAULT_AUTOMATION: AutomationSettings = {
 
 const INITIAL_DB_STATE: Schema = {
   users: [],
+  userData: {},
   profile: DEFAULT_PROFILE,
   opportunities: [],
   proposals: [],
@@ -101,13 +118,13 @@ const INITIAL_DB_STATE: Schema = {
   ],
   accounts: [
     { platform: 'Khamsat', status: 'DISCONNECTED' },
-    { platform: 'Mostaql', status: 'DISCONNECTED' },
-    { platform: 'Fiverr', status: 'DISCONNECTED' }
+    { platform: 'Mostaql', status: 'DISCONNECTED' }
   ]
 };
 
 class LocalDB {
   private data: Schema;
+  private isInitializedFromRemote = false;
 
   constructor() {
     this.ensureDirectoryExists();
@@ -128,19 +145,20 @@ class LocalDB {
     try {
       const content = fs.readFileSync(DB_FILE, 'utf-8');
       const loaded = JSON.parse(content) as Schema;
-      // Merge defaults to support back-compat if schema grows
-      const merged = {
+      
+      // Merge defaults in legacy structure
+      const merged: Schema = {
         users: loaded.users || [],
-        profile: { ...DEFAULT_PROFILE, ...loaded.profile },
+        userData: loaded.userData || {},
+        profile: loaded.profile || DEFAULT_PROFILE,
         opportunities: loaded.opportunities || [],
         proposals: loaded.proposals || [],
-        telegramSettings: { ...DEFAULT_TELEGRAM, ...loaded.telegramSettings },
-        automationSettings: { ...DEFAULT_AUTOMATION, ...loaded.automationSettings },
+        telegramSettings: loaded.telegramSettings || DEFAULT_TELEGRAM,
+        automationSettings: loaded.automationSettings || DEFAULT_AUTOMATION,
         logs: loaded.logs || [],
         accounts: loaded.accounts || [
           { platform: 'Khamsat', status: 'DISCONNECTED' },
-          { platform: 'Mostaql', status: 'DISCONNECTED' },
-          { platform: 'Fiverr', status: 'DISCONNECTED' }
+          { platform: 'Mostaql', status: 'DISCONNECTED' }
         ]
       };
       
@@ -165,13 +183,77 @@ class LocalDB {
       fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2), 'utf-8');
       this.data = data;
     } catch (e) {
-      console.error('Failed to save to local database file:', e);
+      console.error('Failed to save to database file:', e);
     }
   }
 
+  public async initFromPersistentStore() {
+    console.log("Loading Freelance OS state from robust local partition database...");
+    this.isInitializedFromRemote = true;
+  }
+
+  // --- Partition Resolution Helpers ---
+  private getUserDataOf(userEmail?: string): UserData {
+    const email = userEmail ? userEmail.toLowerCase().trim() : 'default';
+    const currentData = this.load();
+    if (!currentData.userData) {
+      currentData.userData = {};
+    }
+    if (!currentData.userData[email]) {
+      // Lazy bootstrap partition from default global keys or default states
+      currentData.userData[email] = {
+        profile: currentData.profile ? { ...currentData.profile } : { ...DEFAULT_PROFILE },
+        opportunities: Array.isArray(currentData.opportunities) ? [...currentData.opportunities] : [],
+        proposals: Array.isArray(currentData.proposals) ? [...currentData.proposals] : [],
+        telegramSettings: currentData.telegramSettings ? { ...currentData.telegramSettings } : { ...DEFAULT_TELEGRAM },
+        automationSettings: currentData.automationSettings ? { ...currentData.automationSettings } : { ...DEFAULT_AUTOMATION },
+        logs: Array.isArray(currentData.logs) ? [...currentData.logs] : [],
+        accounts: Array.isArray(currentData.accounts) ? [...currentData.accounts] : [
+          { platform: 'Khamsat', status: 'DISCONNECTED' },
+          { platform: 'Mostaql', status: 'DISCONNECTED' }
+        ]
+      };
+      this.save(currentData);
+    }
+    return currentData.userData[email];
+  }
+
+  private saveUserDataOf(userEmail: string | undefined, fields: Partial<UserData>) {
+    const email = userEmail ? userEmail.toLowerCase().trim() : 'default';
+    const currentData = this.load();
+    if (!currentData.userData) {
+      currentData.userData = {};
+    }
+    
+    // Ensure the partition's record is initialized first
+    const record = this.getUserDataOf(email);
+    currentData.userData[email] = {
+      ...record,
+      ...fields
+    };
+
+    // If writing to default/guest user, mirror back to legacy keys too
+    if (email === 'default') {
+      if (fields.profile) currentData.profile = fields.profile;
+      if (fields.opportunities) currentData.opportunities = fields.opportunities;
+      if (fields.proposals) currentData.proposals = fields.proposals;
+      if (fields.telegramSettings) currentData.telegramSettings = fields.telegramSettings;
+      if (fields.automationSettings) currentData.automationSettings = fields.automationSettings;
+      if (fields.logs) currentData.logs = fields.logs;
+      if (fields.accounts) currentData.accounts = fields.accounts;
+    }
+
+    this.save(currentData);
+  }
+
   // --- Logs Utility ---
-  public addLog(type: 'info' | 'success' | 'warning' | 'error', source: 'scraper' | 'gemini' | 'telegram' | 'automation' | 'system', message: string) {
-    const freshData = this.load();
+  public addLog(
+    type: 'info' | 'success' | 'warning' | 'error', 
+    source: 'scraper' | 'gemini' | 'telegram' | 'automation' | 'system', 
+    message: string,
+    userEmail?: string
+  ) {
+    const userState = this.getUserDataOf(userEmail);
     const newLog: SystemLog = {
       id: `log-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
       type,
@@ -179,66 +261,54 @@ class LocalDB {
       message,
       timestamp: new Date().toISOString()
     };
-    freshData.logs.unshift(newLog);
-    // Keep logs size reasonable (last 300)
-    if (freshData.logs.length > 300) {
-      freshData.logs = freshData.logs.slice(0, 300);
-    }
-    this.save(freshData);
+    const logs = [newLog, ...(userState.logs || [])];
+    this.saveUserDataOf(userEmail, {
+      logs: logs.slice(0, 300)
+    });
     return newLog;
   }
 
-  public getLogs(): SystemLog[] {
-    return this.load().logs;
+  public getLogs(userEmail?: string): SystemLog[] {
+    return this.getUserDataOf(userEmail).logs || [];
   }
 
-  public clearLogs() {
-    const data = this.load();
-    data.logs = [];
-    this.save(data);
+  public clearLogs(userEmail?: string) {
+    this.saveUserDataOf(userEmail, { logs: [] });
   }
 
   // --- Account Connection Utilities ---
-  public getAccounts(): ConnectedAccount[] {
-    const data = this.load();
-    return data.accounts || [
+  public getAccounts(userEmail?: string): ConnectedAccount[] {
+    return (this.getUserDataOf(userEmail).accounts || [
       { platform: 'Khamsat', status: 'DISCONNECTED' },
-      { platform: 'Mostaql', status: 'DISCONNECTED' },
-      { platform: 'Fiverr', status: 'DISCONNECTED' }
-    ];
+      { platform: 'Mostaql', status: 'DISCONNECTED' }
+    ]);
   }
 
-  public getAccount(platform: 'Khamsat' | 'Mostaql' | 'Fiverr'): ConnectedAccount {
-    const accounts = this.getAccounts();
+  public getAccount(platform: 'Khamsat' | 'Mostaql' | 'Fiverr', userEmail?: string): ConnectedAccount {
+    const accounts = this.getAccounts(userEmail);
     const existing = accounts.find(a => a.platform === platform);
     if (existing) return existing;
     return { platform, status: 'DISCONNECTED' };
   }
 
-  public updateAccount(platform: 'Khamsat' | 'Mostaql' | 'Fiverr', updates: Partial<ConnectedAccount>): ConnectedAccount {
-    const data = this.load();
-    if (!data.accounts) {
-      data.accounts = [
-        { platform: 'Khamsat', status: 'DISCONNECTED' },
-        { platform: 'Mostaql', status: 'DISCONNECTED' },
-        { platform: 'Fiverr', status: 'DISCONNECTED' }
-      ];
-    }
-    const idx = data.accounts.findIndex(a => a.platform === platform);
+  public updateAccount(platform: 'Khamsat' | 'Mostaql' | 'Fiverr', updates: Partial<ConnectedAccount>, userEmail?: string): ConnectedAccount {
+    const userState = this.getUserDataOf(userEmail);
+    const accounts = [...(userState.accounts || [])];
+    const idx = accounts.findIndex(a => a.platform === platform);
     if (idx !== -1) {
-      data.accounts[idx] = { ...data.accounts[idx], ...updates };
+      accounts[idx] = { ...accounts[idx], ...updates };
     } else {
-      data.accounts.push({
+      accounts.push({
         platform,
         status: updates.status || 'DISCONNECTED',
         ...updates
-      });
+      } as any);
     }
-    this.save(data);
-    return this.getAccount(platform);
+    this.saveUserDataOf(userEmail, { accounts });
+    return this.getAccount(platform, userEmail);
   }
 
-  // --- Auth Utilities ---
+  // --- Auth & Users Cache Utilities ---
   public getUsers() {
     return this.load().users;
   }
@@ -248,9 +318,9 @@ class LocalDB {
   }
 
   public registerUser(email: string, name: string, passwordHash: string, customId?: string) {
-    const data = this.load();
+    const currentData = this.load();
     const emailLower = email.toLowerCase().trim();
-    if (data.users.some(u => u.email === emailLower)) {
+    if (currentData.users.some(u => u.email === emailLower)) {
       throw new Error(`User with email ${email} already exists.`);
     }
     const user = {
@@ -260,9 +330,13 @@ class LocalDB {
       passwordHash,
       createdAt: new Date().toISOString()
     };
-    data.users.push(user);
-    this.save(data);
-    this.addLog('success', 'system', `New user registered: ${name} (${emailLower})`);
+    currentData.users.push(user);
+    this.save(currentData);
+    
+    // Prime the partition layout for this new user account
+    this.getUserDataOf(emailLower);
+    
+    this.addLog('success', 'system', `New user registered: ${name} (${emailLower})`, emailLower);
     return { id: user.id, email: user.email, name: user.name };
   }
 
@@ -271,40 +345,42 @@ class LocalDB {
   }
 
   public updateUserPasswordHash(email: string, passwordHash: string) {
-    const data = this.load();
+    const currentData = this.load();
     const emailLower = email.toLowerCase().trim();
-    const userIndex = data.users.findIndex(u => u.email.toLowerCase().trim() === emailLower);
+    const userIndex = currentData.users.findIndex(u => u.email.toLowerCase().trim() === emailLower);
     if (userIndex !== -1) {
-      data.users[userIndex].passwordHash = passwordHash;
-      this.save(data);
+      currentData.users[userIndex].passwordHash = passwordHash;
+      this.save(currentData);
       return true;
     }
     return false;
   }
 
   // --- Freelancer Profile Utilities ---
-  public getProfile(): FreelancerProfile {
-    return this.load().profile;
+  public getProfile(userEmail?: string): FreelancerProfile {
+    return this.getUserDataOf(userEmail).profile;
   }
 
-  public updateProfile(profile: Partial<FreelancerProfile>): FreelancerProfile {
-    const data = this.load();
-    data.profile = { ...data.profile, ...profile };
-    this.save(data);
-    this.addLog('info', 'system', 'Freelancer profile settings updated.');
-    return data.profile;
+  public updateProfile(profile: Partial<FreelancerProfile>, userEmail?: string): FreelancerProfile {
+    const userState = this.getUserDataOf(userEmail);
+    const updatedProfile = { ...userState.profile, ...profile };
+    this.saveUserDataOf(userEmail, { profile: updatedProfile });
+    this.addLog('info', 'system', 'Freelancer profile settings updated.', userEmail);
+    return updatedProfile;
   }
 
   // --- Opportunities System Utilities ---
-  public getOpportunities(): Opportunity[] {
-    // Sort so newest are first
-    return [...this.load().opportunities].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+  public getOpportunities(userEmail?: string): Opportunity[] {
+    const ops = this.getUserDataOf(userEmail).opportunities || [];
+    return [...ops].sort((a, b) => new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime());
   }
 
-  public addOpportunity(op: Opportunity): Opportunity {
-    const data = this.load();
-    // Prevent duplicate scrape entry based on ID, original URL, canonical URL, or matching same-project metadata (same title, category, description prefix, and publisher)
-    const existingIndex = data.opportunities.findIndex(o => 
+  public addOpportunity(op: Opportunity, userEmail?: string): Opportunity {
+    const userState = this.getUserDataOf(userEmail);
+    const opportunities = [...(userState.opportunities || [])];
+
+    // Prevent duplicate scrape entry based on ID, original URL, canonical URL
+    const existingIndex = opportunities.findIndex(o => 
       o.id === op.id || 
       o.link === op.link ||
       (op.canonicalUrl && o.canonicalUrl === op.canonicalUrl) ||
@@ -319,8 +395,7 @@ class LocalDB {
       )
     );
     if (existingIndex !== -1) {
-      // If we got a new link for the same project, let's keep the existing, but log the duplicate identification
-      return data.opportunities[existingIndex];
+      return opportunities[existingIndex];
     }
     const freshOp: Opportunity = {
       ...op,
@@ -328,83 +403,90 @@ class LocalDB {
       validationStatus: op.validationStatus || 'VALID',
       lastValidatedAt: op.lastValidatedAt || new Date().toISOString()
     };
-    data.opportunities.push(freshOp);
-    this.save(data);
-    this.addLog('success', 'scraper', `New opportunity discovered on ${op.platform}: "${op.title}"`);
+    opportunities.push(freshOp);
+    this.saveUserDataOf(userEmail, { opportunities });
+    this.addLog('success', 'scraper', `New opportunity discovered on ${op.platform}: "${op.title}"`, userEmail);
     return freshOp;
   }
 
-  public updateOpportunity(id: string, updates: Partial<Opportunity>): Opportunity {
-    const data = this.load();
-    const index = data.opportunities.findIndex(o => o.id === id);
+  public updateOpportunity(id: string, updates: Partial<Opportunity>, userEmail?: string): Opportunity {
+    const userState = this.getUserDataOf(userEmail);
+    const opportunities = [...(userState.opportunities || [])];
+    const index = opportunities.findIndex(o => o.id === id);
     if (index === -1) {
       throw new Error(`Opportunity with ID ${id} not found.`);
     }
-    data.opportunities[index] = { ...data.opportunities[index], ...updates };
-    this.save(data);
-    return data.opportunities[index];
+    opportunities[index] = { ...opportunities[index], ...updates };
+    this.saveUserDataOf(userEmail, { opportunities });
+    return opportunities[index];
   }
 
-  public purgeMockData() {
-    const data = this.load();
-    data.opportunities = [];
-    data.proposals = [];
-    this.save(data);
-    this.addLog('warning', 'system', 'Purged all jobs and proposals.');
+  public purgeMockData(userEmail?: string) {
+    this.saveUserDataOf(userEmail, { 
+      opportunities: [], 
+      proposals: [] 
+    });
+    this.addLog('warning', 'system', 'Purged all jobs and proposals.', userEmail);
+  }
+
+  public clearAllOpportunities(userEmail?: string) {
+    this.saveUserDataOf(userEmail, { opportunities: [] });
+    this.addLog('warning', 'system', 'Cleared all opportunities from the database without affecting AI proposals, profile settings, or configurations.', userEmail);
   }
 
   // --- Proposals System Utilities ---
-  public getProposals(): Proposal[] {
-    return this.load().proposals;
+  public getProposals(userEmail?: string): Proposal[] {
+    return this.getUserDataOf(userEmail).proposals || [];
   }
 
-  public addProposal(prop: Proposal): Proposal {
-    const data = this.load();
-    // Exists check
-    const existingIndex = data.proposals.findIndex(p => p.id === prop.id);
+  public addProposal(prop: Proposal, userEmail?: string): Proposal {
+    const userState = this.getUserDataOf(userEmail);
+    const proposals = [...(userState.proposals || [])];
+    const existingIndex = proposals.findIndex(p => p.id === prop.id);
     if (existingIndex !== -1) {
-      data.proposals[existingIndex] = prop;
+      proposals[existingIndex] = prop;
     } else {
-      data.proposals.push(prop);
+      proposals.push(prop);
     }
-    this.save(data);
+    this.saveUserDataOf(userEmail, { proposals });
     return prop;
   }
 
-  public updateProposal(id: string, updates: Partial<Proposal>): Proposal {
-    const data = this.load();
-    const index = data.proposals.findIndex(p => p.id === id);
+  public updateProposal(id: string, updates: Partial<Proposal>, userEmail?: string): Proposal {
+    const userState = this.getUserDataOf(userEmail);
+    const proposals = [...(userState.proposals || [])];
+    const index = proposals.findIndex(p => p.id === id);
     if (index === -1) {
       throw new Error(`Proposal with ID ${id} not found.`);
     }
-    data.proposals[index] = { ...data.proposals[index], ...updates };
-    this.save(data);
-    return data.proposals[index];
+    proposals[index] = { ...proposals[index], ...updates };
+    this.saveUserDataOf(userEmail, { proposals });
+    return proposals[index];
   }
 
   // --- Settings Utilities ---
-  public getTelegramSettings(): TelegramSettings {
-    return this.load().telegramSettings;
+  public getTelegramSettings(userEmail?: string): TelegramSettings {
+    return this.getUserDataOf(userEmail).telegramSettings;
   }
 
-  public updateTelegramSettings(settings: Partial<TelegramSettings>): TelegramSettings {
-    const data = this.load();
-    data.telegramSettings = { ...data.telegramSettings, ...settings };
-    this.save(data);
-    this.addLog('info', 'telegram', 'Telegram configuration updated.');
-    return data.telegramSettings;
+  public updateTelegramSettings(settings: Partial<TelegramSettings>, userEmail?: string): TelegramSettings {
+    const userState = this.getUserDataOf(userEmail);
+    const updatedSettings = { ...userState.telegramSettings, ...settings };
+    this.saveUserDataOf(userEmail, { telegramSettings: updatedSettings });
+    this.addLog('info', 'telegram', 'Telegram configuration updated.', userEmail);
+    return updatedSettings;
   }
 
-  public getAutomationSettings(): AutomationSettings {
-    return this.load().automationSettings;
+  public getAutomationSettings(userEmail?: string): AutomationSettings {
+    return this.getUserDataOf(userEmail).automationSettings;
   }
 
-  public updateAutomationSettings(settings: Partial<AutomationSettings>): AutomationSettings {
-    const data = this.load();
-    data.automationSettings = { ...data.automationSettings, ...settings };
-    this.save(data);
-    this.addLog('info', 'automation', `Automation mode changed: Mode=${data.automationSettings.mode}`);
-    return data.automationSettings;
+  public updateAutomationSettings(settings: Partial<AutomationSettings>, userEmail?: string): AutomationSettings {
+    const userState = this.getUserDataOf(userEmail);
+    const updatedSettings = { ...userState.automationSettings, ...settings };
+    this.saveUserDataOf(userEmail, { automationSettings: updatedSettings });
+    this.addLog('info', 'automation', `Automation mode changed: Mode=${updatedSettings.mode}`, userEmail);
+    return updatedSettings;
   }
 }
 

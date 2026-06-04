@@ -30,6 +30,7 @@ export default function DashboardView({ onNavigate, onShowToast }: DashboardView
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [logs, setLogs] = useState<SystemLog[]>([]);
   const [highMatches, setHighMatches] = useState<Opportunity[]>([]);
+  const [scraperAnalytics, setScraperAnalytics] = useState<any>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [purging, setPurging] = useState(false);
 
@@ -38,10 +39,11 @@ export default function DashboardView({ onNavigate, onShowToast }: DashboardView
       const token = localStorage.getItem('freelance_os_token');
       const headersOption = token ? { 'Authorization': `Bearer ${token}` } : {};
 
-      const [statsRes, logsRes, opsRes] = await Promise.all([
+      const [statsRes, logsRes, opsRes, analyticsRes] = await Promise.all([
         fetch('/api/dashboard/stats', { headers: headersOption }),
         fetch('/api/logs', { headers: headersOption }),
-        fetch('/api/opportunities?minScore=80', { headers: headersOption })
+        fetch('/api/opportunities?minScore=80', { headers: headersOption }),
+        fetch('/api/scraper/analytics', { headers: headersOption })
       ]);
 
       if (statsRes.ok && logsRes.ok && opsRes.ok) {
@@ -54,6 +56,11 @@ export default function DashboardView({ onNavigate, onShowToast }: DashboardView
         // Clean out submitted opportunities to make dashboard clean
         const activeOps = opsData.filter((o: any) => o.status !== 'submitted');
         setHighMatches(activeOps.slice(0, 3)); // Top 3 matching jobs
+      }
+
+      if (analyticsRes && analyticsRes.ok) {
+        const analyticsData = await analyticsRes.json();
+        setScraperAnalytics(analyticsData);
       }
     } catch (err) {
       console.error('Failed to update dashboard feeds:', err);
@@ -318,8 +325,8 @@ export default function DashboardView({ onNavigate, onShowToast }: DashboardView
                           )}
                         </span>
                       </div>
-                      <h4 className="text-sm font-semibold text-slate-200 truncate pr-4">{job.title}</h4>
-                      <p className="text-xs text-slate-400 line-clamp-2">{job.description}</p>
+                      <h4 className="text-sm font-semibold text-slate-200 truncate pr-4" dir={['Mostaql', 'Khamsat'].includes(job.platform) ? 'rtl' : 'ltr'}>{job.title}</h4>
+                      <p className="text-xs text-slate-400 line-clamp-2" dir={['Mostaql', 'Khamsat'].includes(job.platform) ? 'rtl' : 'ltr'}>{job.description}</p>
                     </div>
 
                     <div className="flex items-center gap-3 shrink-0 self-end md:self-center">

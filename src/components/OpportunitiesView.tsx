@@ -47,6 +47,42 @@ export default function OpportunitiesView({
   const [writingId, setWritingId] = useState<string | null>(null);
   const [activeFilter, setActiveFilter] = useState('all');
   const [revalidating, setRevalidating] = useState(false);
+  const [clearing, setClearing] = useState(false);
+  const [confirmClear, setConfirmClear] = useState(false);
+
+  useEffect(() => {
+    if (confirmClear) {
+      const timer = setTimeout(() => {
+        setConfirmClear(false);
+      }, 4000);
+      return () => clearTimeout(timer);
+    }
+  }, [confirmClear]);
+
+  const handleClearAllOpportunities = async () => {
+    if (!confirmClear) {
+      setConfirmClear(true);
+      onShowToast('Click again to confirm removing all opportunities.', 'info');
+      return;
+    }
+    setConfirmClear(false);
+    setClearing(true);
+    onShowToast('Removing opportunities from database...', 'info');
+    try {
+      const response = await fetch('/api/opportunities/clear-all', { method: 'POST' });
+      const data = await response.json();
+      if (response.ok) {
+        onShowToast(data.message || 'All opportunities have been removed from the database.', 'success');
+        fetchOpportunities();
+      } else {
+        onShowToast(data.error || 'Failed to remove opportunities.', 'error');
+      }
+    } catch (_) {
+      onShowToast('Network error while clearing database.', 'error');
+    } finally {
+      setClearing(false);
+    }
+  };
 
   const handleRevalidateAll = async () => {
     setRevalidating(true);
@@ -383,6 +419,21 @@ export default function OpportunitiesView({
               {revalidating ? 'Revalidating...' : 'Revalidate Channels'}
             </button>
 
+            <button
+              onClick={handleClearAllOpportunities}
+              disabled={loading || clearing}
+              className={`flex items-center gap-1.5 px-3 py-1.5 font-mono text-[10px] font-bold uppercase tracking-wider rounded cursor-pointer disabled:opacity-50 transition border ${
+                confirmClear
+                  ? "bg-red-950/80 hover:bg-red-900 border-red-500/50 text-red-200"
+                  : "bg-[#121522] hover:bg-[#1a1e30] border-[#1e2235] hover:border-[#1e2235] text-rose-300 hover:text-rose-200"
+              }`}
+              id="clear-all-opportunities-btn"
+              title="Deletes all cached opportunities while preserving profile bio and submitted proposals"
+            >
+              <Trash2 size={12} className={confirmClear ? "text-red-400 animate-pulse" : "text-rose-400"} />
+              {confirmClear ? "Confirm Clear?" : (clearing ? "Clearing..." : "Clear All")}
+            </button>
+
             <span className="font-mono text-[11px] text-slate-400 uppercase tracking-wider">
               Filtered count: <strong className="text-slate-200">{displayedJobs.length}</strong> opportunities
             </span>
@@ -485,7 +536,7 @@ export default function OpportunitiesView({
                     </span>
                   </div>
 
-                  <div className="space-y-1">
+                  <div className="space-y-1" dir={['Mostaql', 'Khamsat'].includes(job.platform) ? 'rtl' : 'ltr'}>
                     <h3 className="text-base font-bold text-slate-100 group flex items-center gap-2">
                       {job.title}
                       <a href={getCleanJobLink(job)} target="_blank" rel="noreferrer" className="text-slate-500 hover:text-blue-400 transition" id={`op-link-${job.id}`}>
@@ -497,7 +548,7 @@ export default function OpportunitiesView({
                     </p>
                   </div>
 
-                  <p className="text-sm text-slate-350 leading-relaxed whitespace-pre-wrap">{job.description}</p>
+                  <p className="text-sm text-slate-350 leading-relaxed whitespace-pre-wrap" dir={['Mostaql', 'Khamsat'].includes(job.platform) ? 'rtl' : 'ltr'}>{job.description}</p>
 
                   {/* Actions Bar */}
                   <div className="flex flex-wrap gap-2.5 pt-4 border-t border-[#1e2235]/40">

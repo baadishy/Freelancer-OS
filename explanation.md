@@ -155,7 +155,22 @@ Once an opportunity is successfully discovered and flagged as healthy (`validati
 
 ---
 
-## 9. Telegram Operations and Notifications Hub (`/server/telegram.ts`)
+## 9. Safe Opportunities Clearing Engine ("Clear All Opportunities")
+To maintain healthy disk space, improve feed query performance, and declutter the project dashboard, **Freelance OS** provides a secure database sweep operation:
+- **API Endpoint**: `POST /api/opportunities/clear-all`
+- **Database Logic (`db.clearAllOpportunities`)**:
+  - Automatically empties the `data.opportunities` array in memory and persists the clean empty array back to `data/db.json`.
+  - Intentionally preserves the rest of the schemas: and specifically leaves generated proposals (`proposals`), settings configurations (`automationSettings` and `telegramSettings`), registered accounts (`accounts`), and user profiles (`profile`) completely untouched.
+  - Documents a system trace log warning: *'Cleared all opportunities from the database without affecting AI proposals, profile settings, or configurations.'*
+- **Polished Frontend Confirmation Flow**:
+  - To prevent catastrophic accidental clearing on standard browsers, we designed a custom **Double-Click Confirmation State** using inline animations and timing hooks rather than utilizing blocking windows (`window.confirm`) that might break if sandboxed inside an iframe.
+  - The first click changes the button state to a highlighted warning ("Confirm Clear?") and pulses a bright red warning trash icon.
+  - A 4-second timeout monitor is registered; if a second confirmation click isn't issued within 4 seconds, the button automatically resets back to its standard inactive state.
+  - On the second click, it safely fires the query and clears the dashboard.
+
+---
+
+## 10. Telegram Operations and Notifications Hub (`/server/telegram.ts`)
 The Telegram integration transforms the OS into a highly responsive, remote-monitored system:
 - **Chatbot integration**: Operates an Express-side webhook configuration or a long-poll checker matching incoming messages against a secure Telegram Bot token.
 - **Platform Telemetry Alerts**: If the scraper discovers a job alignment score of $\ge 80\%$, an immediate Telegram broadcast message is sent to the developer with the project description and direct UI links.

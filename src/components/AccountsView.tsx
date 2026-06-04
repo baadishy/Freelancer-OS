@@ -38,7 +38,7 @@ export default function AccountsView({ onShowToast }: AccountsViewProps) {
   const [customChromePath, setCustomChromePath] = useState('');
 
   // Virtual Browser active session variables
-  const [activePlatform, setActivePlatform] = useState<'Khamsat' | 'Mostaql' | 'Fiverr' | null>(null);
+  const [activePlatform, setActivePlatform] = useState<'Khamsat' | 'Mostaql' | null>(null);
   const [screenshot, setScreenshot] = useState<string | null>(null);
   const [browserLoading, setBrowserLoading] = useState(false);
   const [typeValue, setTypeValue] = useState('');
@@ -47,11 +47,11 @@ export default function AccountsView({ onShowToast }: AccountsViewProps) {
 
   // Interaction enhancement states
   const [clickHoldMode, setClickHoldMode] = useState(false);
-  const [holdDuration, setHoldDuration] = useState(6000); // Default to 6 seconds for Fiverr
+  const [holdDuration, setHoldDuration] = useState(6000); // Default to 6 seconds
 
   // Manual session cookie variables
   const [showCookieImport, setShowCookieImport] = useState(false);
-  const [cookiePlatform, setCookiePlatform] = useState<'Khamsat' | 'Mostaql' | 'Fiverr'>('Khamsat');
+  const [cookiePlatform, setCookiePlatform] = useState<'Khamsat' | 'Mostaql'>('Khamsat');
   const [cookieJson, setCookieJson] = useState('');
   const [cookieImporting, setCookieImporting] = useState(false);
   const [cookieHelpOpen, setCookieHelpOpen] = useState(false);
@@ -108,7 +108,7 @@ export default function AccountsView({ onShowToast }: AccountsViewProps) {
     }
   };
 
-  const handleStartConnection = async (platform: 'Khamsat' | 'Mostaql' | 'Fiverr') => {
+  const handleStartConnection = async (platform: 'Khamsat' | 'Mostaql') => {
     setBrowserLoading(true);
     setActivePlatform(platform);
     setScreenshot(null);
@@ -229,7 +229,7 @@ export default function AccountsView({ onShowToast }: AccountsViewProps) {
     fetchAccounts();
   };
 
-  const handleDisconnect = async (platform: 'Khamsat' | 'Mostaql' | 'Fiverr') => {
+  const handleDisconnect = async (platform: 'Khamsat' | 'Mostaql') => {
     if (!confirm(`Are you sure you want to disconnect your ${platform} account? This will permanently close the session and wipe your stored browser profile directory.`)) return;
 
     try {
@@ -251,7 +251,7 @@ export default function AccountsView({ onShowToast }: AccountsViewProps) {
     }
   };
 
-  const handleValidateSession = async (platform: 'Khamsat' | 'Mostaql' | 'Fiverr') => {
+  const handleValidateSession = async (platform: 'Khamsat' | 'Mostaql') => {
     onShowToast(`Validating live credentials persistent profile for ${platform}...`, 'info');
     try {
       const response = await fetch('/api/accounts/validate', {
@@ -478,7 +478,6 @@ export default function AccountsView({ onShowToast }: AccountsViewProps) {
                     >
                       <option value="Khamsat">Khamsat</option>
                       <option value="Mostaql">Mostaql</option>
-                      <option value="Fiverr">Fiverr</option>
                     </select>
                   </div>
                   <div className="flex items-end">
@@ -500,8 +499,8 @@ export default function AccountsView({ onShowToast }: AccountsViewProps) {
                       Two-Step Clipboard Snippet Instructions
                     </h4>
                     <ol className="list-decimal list-inside space-y-1.5 text-[11px] leading-relaxed text-slate-350">
-                      <li>Log in normally to <a href={cookiePlatform === 'Khamsat' ? 'https://khamsat.com' : cookiePlatform === 'Mostaql' ? 'https://mostaql.com' : 'https://www.fiverr.com'} target="_blank" rel="noreferrer" className="text-blue-400 hover:underline">
-                        {cookiePlatform === 'Khamsat' ? 'Khamsat.com' : cookiePlatform === 'Mostaql' ? 'Mostaql.com' : 'Fiverr.com'}
+                      <li>Log in normally to <a href={cookiePlatform === 'Khamsat' ? 'https://khamsat.com' : 'https://mostaql.com'} target="_blank" rel="noreferrer" className="text-blue-400 hover:underline">
+                        {cookiePlatform === 'Khamsat' ? 'Khamsat.com' : 'Mostaql.com'}
                       </a> in your actual Google Chrome browser.</li>
                       <li>Press <kbd className="bg-slate-800 px-1 py-0.5 rounded text-[10px] font-mono">F12</kbd> (or right click → <strong>Inspect</strong>) and click the <strong>Console</strong> tab.</li>
                       <li>Copy and Paste the command below and hit Enter (it copies the exact session layout to your clipboard automatically):</li>
@@ -682,7 +681,7 @@ export default function AccountsView({ onShowToast }: AccountsViewProps) {
                         className="w-full text-amber-500 accent-amber-500 focus:outline-none cursor-pointer"
                       />
                       <p className="text-[9px] text-slate-400 leading-relaxed font-sans">
-                        Any click on the screen above will hold the browser mouse down for <strong>{(holdDuration/1000)}s</strong> before releasing. Useful for passing <strong>Fiverr's manual security verification loop</strong>.
+                        Any click on the screen above will hold the browser mouse down for <strong>{(holdDuration/1000)}s</strong> before releasing. Useful for passing manual security verification loops.
                       </p>
                     </div>
                   )}

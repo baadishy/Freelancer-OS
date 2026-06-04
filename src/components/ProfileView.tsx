@@ -85,7 +85,7 @@ export default function ProfileView({ onShowToast }: ProfileViewProps) {
   const [optimizingPlatform, setOptimizingPlatform] = useState<string | null>(null);
   const [cookieExplanations, setCookieExplanations] = useState<{ [platform: string]: string }>({});
 
-  const handleOptimizeCookieWithAI = async (platform: 'Khamsat' | 'Mostaql' | 'Fiverr', value: string) => {
+  const handleOptimizeCookieWithAI = async (platform: 'Khamsat' | 'Mostaql', value: string) => {
     if (!value) {
       onShowToast(`Please input some cookie contents for ${platform} first.`, 'error');
       return;
@@ -104,9 +104,8 @@ export default function ProfileView({ onShowToast }: ProfileViewProps) {
       const data = await res.json();
       if (data.optimizedCookie && profile) {
         const cookies = profile.platformCookies || {};
-        let targetKey: 'khamsat' | 'mostaql' | 'fiverr' = 'khamsat';
+        let targetKey: 'khamsat' | 'mostaql' = 'khamsat';
         if (platform === 'Mostaql') targetKey = 'mostaql';
-        if (platform === 'Fiverr') targetKey = 'fiverr';
         
         setProfile(prev => prev ? {
           ...prev,
@@ -125,7 +124,7 @@ export default function ProfileView({ onShowToast }: ProfileViewProps) {
     }
   };
 
-  const handleTestCookie = async (platform: 'Khamsat' | 'Mostaql' | 'Fiverr', value: string) => {
+  const handleTestCookie = async (platform: 'Khamsat' | 'Mostaql', value: string) => {
     if (!value) {
       onShowToast(`Please input some cookie contents for ${platform} first.`, 'error');
       return;
@@ -147,9 +146,8 @@ export default function ProfileView({ onShowToast }: ProfileViewProps) {
         onShowToast(`${platform} session is ACTIVE and verified!`, 'success');
         if (data.cookieHeader && profile) {
           const cookies = profile.platformCookies || {};
-          let targetKey: 'khamsat' | 'mostaql' | 'fiverr' = 'khamsat';
+          let targetKey: 'khamsat' | 'mostaql' = 'khamsat';
           if (platform === 'Mostaql') targetKey = 'mostaql';
-          if (platform === 'Fiverr') targetKey = 'fiverr';
           setProfile(prev => prev ? { 
             ...prev, 
             platformCookies: { ...cookies, [targetKey]: data.cookieHeader } 
@@ -1006,91 +1004,7 @@ export default function ProfileView({ onShowToast }: ProfileViewProps) {
                     </div>
                   </div>
 
-                  {/* Fiverr Sync */}
-                  <div className="bg-[#0b0d18] border border-[#1e2235]/60 rounded-xl p-4 space-y-3">
-                    <div className="flex items-center justify-between">
-                      <div className="space-y-0.5">
-                        <label className="block text-xs font-bold text-slate-200 font-mono" htmlFor="cookie-fiverr-input">Fiverr Authorization Token or Table</label>
-                        <span className="text-[10px] text-slate-500 font-sans block">Primary cookie key: <code className="text-amber-400">_fiverr_session</code> or auth value</span>
-                      </div>
-                      <span className="text-[9px] font-bold text-slate-400 uppercase font-mono px-2 py-0.5 bg-[#07080d]/80 rounded border border-slate-800">
-                        Fiverr
-                      </span>
-                    </div>
 
-                    <textarea
-                      id="cookie-fiverr-input"
-                      rows={3}
-                      className="w-full bg-[#040508] border border-[#1e2235] text-slate-300 rounded-lg p-2.5 text-xs outline-none focus:ring-1 focus:ring-indigo-600 placeholder-slate-700 font-mono"
-                      placeholder="Paste either fiverr_session value, entire raw header, or copy-paste the whole cookie table directly from DevTools Application tab!"
-                      value={profile?.platformCookies?.fiverr || ''}
-                      onChange={(e) => {
-                        const cookies = profile?.platformCookies || {};
-                        handleUpdateProfileField('platformCookies', { ...cookies, fiverr: e.target.value });
-                      }}
-                    />
-
-                    {cookieExplanations['Fiverr'] && (
-                      <div className="p-2 border border-purple-500/10 bg-purple-500/5 rounded-lg text-[10px] text-slate-300 font-sans leading-relaxed flex items-start gap-1.5 animate-gradient-slow" id="fiverr-ai-explanation">
-                        <Sparkles size={11} className="text-purple-400 shrink-0 mt-0.5 animate-bounce" />
-                        <span><strong>AI Selection Decision:</strong> {cookieExplanations['Fiverr']}</span>
-                      </div>
-                    )}
-
-                    <div className="flex flex-wrap items-center justify-between gap-2 pt-1 font-mono text-[10px]">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <button
-                          id="test-fiverr-cookie-btn"
-                          type="button"
-                          onClick={() => handleTestCookie('Fiverr', profile?.platformCookies?.fiverr || '')}
-                          disabled={testingPlatform === 'Fiverr'}
-                          className="flex items-center gap-1.5 px-3 py-1.5 bg-[#141829] hover:bg-slate-800 text-[#a5b4fc] border border-indigo-500/20 hover:border-indigo-400/40 rounded transition cursor-pointer select-none"
-                        >
-                          {testingPlatform === 'Fiverr' ? (
-                            <Activity size={12} className="animate-spin text-indigo-400" />
-                          ) : (
-                            <ShieldCheck size={12} className="text-emerald-400" />
-                          )}
-                          {testingPlatform === 'Fiverr' ? 'Validating...' : 'Test Active Cookie'}
-                        </button>
-
-                        <button
-                          id="optimize-fiverr-cookie-ai-btn"
-                          type="button"
-                          onClick={() => handleOptimizeCookieWithAI('Fiverr', profile?.platformCookies?.fiverr || '')}
-                          disabled={optimizingPlatform === 'Fiverr'}
-                          className="flex items-center gap-1.5 px-3 py-1.5 bg-[#17101f] hover:bg-[#281b37] text-purple-200 border border-purple-500/20 hover:border-purple-400/45 rounded transition cursor-pointer select-none"
-                        >
-                          {optimizingPlatform === 'Fiverr' ? (
-                            <Activity size={12} className="animate-spin text-purple-400" />
-                          ) : (
-                            <Sparkles size={12} className="text-purple-400 animate-pulse" />
-                          )}
-                          {optimizingPlatform === 'Fiverr' ? 'Analyzing...' : 'AI Clean & Select'}
-                        </button>
-                      </div>
-
-                      {/* Status Indicator Badge */}
-                      {testResults['Fiverr'] ? (
-                        testResults['Fiverr'].success ? (
-                          <span className="flex items-center gap-1 text-emerald-400 font-bold bg-emerald-500/10 px-2.5 py-1 rounded-full border border-emerald-500/25 animate-pulse">
-                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                            ACTIVE
-                          </span>
-                        ) : (
-                          <span className="flex items-center gap-1 text-rose-455 font-bold bg-rose-500/10 px-2.5 py-1 rounded-full border border-rose-500/25">
-                            <span className="w-1.5 h-1.5 rounded-full bg-rose-400" />
-                            EXPIRED / UNVERIFIED
-                          </span>
-                        )
-                      ) : (
-                        <span className="flex items-center gap-1 text-slate-455 font-bold bg-[#07080d]/60 px-2.5 py-1 rounded-full border border-slate-800 text-[9px]">
-                          <span className="w-1.5 h-1.5 rounded-full bg-slate-500" />
-                          UNTESTED - PARSER STANDBY
-                        </span>
-                      )}
-                    </div>
-                  </div>
                 </div>
 
                 <div className="pt-2">
@@ -1113,7 +1027,7 @@ export default function ProfileView({ onShowToast }: ProfileViewProps) {
                 
                 <ol className="list-decimal list-inside space-y-3.5 text-slate-400 font-sans leading-relaxed text-xs">
                   <li>
-                    Open a new tab and log in to <strong className="text-slate-200">Khamsat</strong>, <strong className="text-slate-200">Mostaql</strong>, or <strong className="text-slate-200">Fiverr</strong> under your own account.
+                    Open a new tab and log in to <strong className="text-slate-200">Khamsat</strong> or <strong className="text-slate-200">Mostaql</strong> under your own account.
                   </li>
                   <li>
                     Right-click anywhere on page, select <strong className="text-[#a5b4fc]">Inspect</strong>, or press <kbd className="px-1.5 py-0.5 bg-[#121522] border border-[#1e2235] rounded font-mono text-[10px] text-[#a5b4fc]">F12</kbd>.

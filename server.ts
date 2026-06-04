@@ -10,12 +10,14 @@ import { createServer as createViteServer } from "vite";
 import dotenv from "dotenv";
 
 // Import backend systems
-import { db } from './server/db.ts';
+import { db, userSessionStorage } from './server/db.ts';
 import { isGeminiConfigured, getGeminiClient } from './server/gemini.ts';
 import { analyzeOpportunity, writeProposal, analyzeJobAndGenerateProposal } from './server/proposal.ts';
 import { startScheduler, sendTelegramMessage, sendDailyBriefingReport, escapeMarkdown } from './server/telegram.ts';
 import { triggerActivePlatformsScrape, startScraperScheduler, revalidateSavedOpportunities } from './server/scraper.ts';
+import { getScraperAnalytics, saveScraperAnalytics } from './server/scraper-analytics.ts';
 import { playwrightSession, validatePlatformSession, submitProposalViaPlaywright, detectChromePath, importCookiesToPlatform, validateOpportunity, extractMostaqlOpportunity, extractKhamsatOpportunity, extractFiverrOpportunity, launchPlaywrightPersistent, extractKhamsatId } from './server/playwright-session.ts';
+import { validateSemanticConsistency, extractBoardTitleFromKhamsatUrl } from './server/url-resolver.ts';
 import { Opportunity, Proposal } from './src/types.ts';
 import { Type } from "@google/genai";
 
@@ -90,12 +92,61 @@ function normalizeCookie(cookieVal: string, defaultKey: string): string {
 }
 
 async function startServer() {
+  // Restore all system state and collections from Firestore on container reboot
+  await db.initFromPersistentStore();
+
   const app = express();
   const PORT = 3000;
 
   // Real-time body parsers
   app.use(express.json({ limit: '10mb' }));
   app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+  // Helper to extract session email from cookie or Authorization header
+  function getLoggedInUserEmail(req: express.Request): string | undefined {
+    // 1. Try Cookie
+    const cookieHeader = req.headers.cookie;
+    if (cookieHeader) {
+      const list: Record<string, string> = {};
+      cookieHeader.split(';').forEach((cookie: string) => {
+        const parts = cookie.split('=');
+        const key = parts.shift()?.trim();
+        if (key) {
+          list[key] = decodeURIComponent(parts.join('='));
+        }
+      });
+      if (list.user_email) {
+        return list.user_email.toLowerCase().trim();
+      }
+    }
+
+    // 2. Try Authorization Header
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      const token = authHeader.split(' ')[1];
+      const match = token.match(/session_token_(user-\d+)/);
+      if (match) {
+        const userId = match[1];
+        const user = db.getSnapshot().users.find((u: any) => u.id === userId);
+        if (user) {
+          return user.email.toLowerCase().trim();
+        }
+      }
+    }
+    return undefined;
+  }
+
+  // Middleware to run HTTP requests in the scope of logged-in user email
+  app.use((req, res, next) => {
+    const email = getLoggedInUserEmail(req);
+    if (email) {
+      userSessionStorage.run(email, () => {
+        next();
+      });
+    } else {
+      next();
+    }
+  });
 
   // Initialize schedulers (Telegram briefings and active platform scanners)
   startScheduler();
@@ -115,6 +166,15 @@ async function startServer() {
       // Simple hash simulation for local data-safety
       const passwordHash = `sim_hash_${Buffer.from(password).toString('base64')}`;
       const user = db.registerUser(email, name, passwordHash);
+
+      // Write session cookie
+      res.cookie('user_email', email.toLowerCase().trim(), {
+        maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+        path: '/',
+        httpOnly: false,
+        sameSite: 'lax'
+      });
+
       res.status(201).json({ 
         user: { id: user.id, email: user.email, name: user.name, passwordHash }, 
         message: 'Signup completed successfully.' 
@@ -138,6 +198,15 @@ async function startServer() {
       if (user.passwordHash !== passwordHash) {
         return res.status(401).json({ error: 'Incorrect email or password.' });
       }
+
+      // Write session cookie
+      res.cookie('user_email', email.toLowerCase().trim(), {
+        maxAge: 30 * 24 * 60 * 60 * 1000,
+        path: '/',
+        httpOnly: false,
+        sameSite: 'lax'
+      });
+
       res.json({
         user: { id: user.id, email: user.email, name: user.name, passwordHash: user.passwordHash },
         token: `session_token_${user.id}_${Date.now()}`
@@ -162,34 +231,60 @@ async function startServer() {
         db.updateUserPasswordHash(user.email, user.passwordHash);
       }
 
+      // Write session cookie
+      const emailLower = user.email.toLowerCase().trim();
+      res.cookie('user_email', emailLower, {
+        maxAge: 30 * 24 * 60 * 60 * 1000,
+        path: '/',
+        httpOnly: false,
+        sameSite: 'lax'
+      });
+
       // If database snapshot is provided, restore state
       if (dbState) {
-        if (dbState.profile) {
-          db.updateProfile(dbState.profile);
-        }
-        if (dbState.telegramSettings) {
-          db.updateTelegramSettings(dbState.telegramSettings);
-        }
-        if (dbState.automationSettings) {
-          db.updateAutomationSettings(dbState.automationSettings);
-        }
-        if (Array.isArray(dbState.opportunities)) {
-          dbState.opportunities.forEach((op: any) => {
-            try {
-              const added = db.addOpportunity(op);
-              if (op.status && added) {
-                db.updateOpportunity(added.id, { status: op.status });
+        userSessionStorage.run(emailLower, () => {
+          if (dbState.profile) {
+            db.updateProfile(dbState.profile);
+          }
+          if (dbState.telegramSettings) {
+            db.updateTelegramSettings(dbState.telegramSettings);
+          }
+          if (dbState.automationSettings) {
+            db.updateAutomationSettings(dbState.automationSettings);
+          }
+          if (Array.isArray(dbState.opportunities)) {
+            dbState.opportunities.forEach((op: any) => {
+              try {
+                const added = db.addOpportunity(op);
+                if (op.status && added) {
+                  db.updateOpportunity(added.id, { status: op.status });
+                }
+              } catch (e) {}
+            });
+          }
+          if (Array.isArray(dbState.proposals)) {
+            dbState.proposals.forEach((prop: any) => {
+              try {
+                db.addProposal(prop);
+              } catch (e) {}
+            });
+          }
+          if (Array.isArray(dbState.accounts)) {
+            dbState.accounts.forEach((acc: any) => {
+              if (acc && acc.platform) {
+                db.updateAccount(acc.platform, {
+                  status: acc.status || 'DISCONNECTED',
+                  username: acc.username,
+                  lastLogin: acc.lastLogin,
+                  lastValidation: acc.lastValidation,
+                  errorMessage: acc.errorMessage,
+                  profileLocation: acc.profileLocation,
+                  cookiesJson: acc.cookiesJson
+                });
               }
-            } catch (e) {}
-          });
-        }
-        if (Array.isArray(dbState.proposals)) {
-          dbState.proposals.forEach((prop: any) => {
-            try {
-              db.addProposal(prop);
-            } catch (e) {}
-          });
-        }
+            });
+          }
+        });
       }
 
       db.addLog('success', 'system', `Session workspace successfully restored for ${user.email}.`);
@@ -538,13 +633,49 @@ async function startServer() {
     }
   });
 
+  app.get('/api/scraper/analytics', (req, res) => {
+    try {
+      const analytics = getScraperAnalytics();
+      res.json(analytics);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Failed to retrieve scraper analytics.' });
+    }
+  });
+
+  app.post('/api/scraper/analytics/reset', (req, res) => {
+    try {
+      const defaultAnalytics = {
+        platformStats: {
+          Khamsat: { platform: 'Khamsat', candidatesDiscovered: 0, validationPassed: 0, validationFailed: 0, redirected: 0, closed: 0, deleted: 0, private: 0, contentMismatch: 0, cannotApply: 0, softInvalid: 0, realCount: 0, simulatedCount: 0, highMatchCount: 0, proposalCapableCount: 0 },
+          Mostaql: { platform: 'Mostaql', candidatesDiscovered: 0, validationPassed: 0, validationFailed: 0, redirected: 0, closed: 0, deleted: 0, private: 0, contentMismatch: 0, cannotApply: 0, softInvalid: 0, realCount: 0, simulatedCount: 0, highMatchCount: 0, proposalCapableCount: 0 },
+          Fiverr: { platform: 'Fiverr', candidatesDiscovered: 0, validationPassed: 0, validationFailed: 0, redirected: 0, closed: 0, deleted: 0, private: 0, contentMismatch: 0, cannotApply: 0, softInvalid: 0, realCount: 0, simulatedCount: 0, highMatchCount: 0, proposalCapableCount: 0 }
+        },
+        topSkills: {},
+        acquisitionScore: 0
+      };
+      saveScraperAnalytics(defaultAnalytics as any);
+      res.json({ success: true, message: 'Scraper analytics successfully reset to pristine values.' });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Failed to reset analytics.' });
+    }
+  });
+
   app.post('/api/opportunities/revalidate', async (req, res) => {
     try {
-      db.addLog('info', 'scraper', 'Manual revalidation of saved opportunities triggered via Web App.');
-      await revalidateSavedOpportunities();
+      db.addLog('info', 'scraper', 'Manual force revalidation of saved opportunities triggered via Web App.');
+      await revalidateSavedOpportunities(true);
       res.json({ success: true, message: 'All active pending opportunities checked. Database states successfully updated.' });
     } catch (err: any) {
       res.status(500).json({ error: err.message || 'Manual revalidation failed.' });
+    }
+  });
+
+  app.post('/api/opportunities/clear-all', (req, res) => {
+    try {
+      db.clearAllOpportunities();
+      res.json({ success: true, message: 'All opportunities cleared from database successfully.' });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Failed to clear opportunities.' });
     }
   });
 
@@ -787,14 +918,44 @@ async function startServer() {
         return res.json({ success: false, steps });
       }
 
+      let originalId: string | null = null;
+      let finalId: string | null = null;
+
       if (platform === 'Khamsat') {
-        const originalServiceId = extractKhamsatId(url);
-        const finalServiceId = extractKhamsatId(finalUrl);
-        if (originalServiceId && finalServiceId && originalServiceId !== finalServiceId) {
-          setStep('Active Browsing Session Check (Playwright)', 'failed', `Khamsat Service Redirect Detected! The original service ID (${originalServiceId}) redirected to another service ID (${finalServiceId}). This indicates the original service is invalid, deleted, or redirected by Khamsat.`);
+        originalId = extractKhamsatId(url);
+        finalId = extractKhamsatId(finalUrl);
+      } else if (platform === 'Mostaql') {
+        const m1 = url.match(/\/project\/(\d+)/i);
+        originalId = m1 ? m1[1] : null;
+        const m2 = finalUrl.match(/\/project\/(\d+)/i);
+        finalId = m2 ? m2[1] : null;
+      } else if (platform === 'Fiverr') {
+        const m1 = url.match(/brief_id=([a-f0-9-]+)/i) || url.match(/\/shares\/(\d+)/i);
+        originalId = m1 ? m1[1] : null;
+        const m2 = finalUrl.match(/brief_id=([a-f0-9-]+)/i) || finalUrl.match(/\/shares\/(\d+)/i);
+        finalId = m2 ? m2[1] : null;
+      }
+
+      if (platform === 'Khamsat') {
+        const isOriginalRequest = url.toLowerCase().includes('/community/requests');
+        const isFinalRequest = finalUrl.toLowerCase().includes('/community/requests');
+        if (isOriginalRequest && !isFinalRequest) {
+          setStep('Active Browsing Session Check (Playwright)', 'failed', `Khamsat Redirect Mismatch! Original request URL redirected to a non-request page type: ${finalUrl}`);
           await context.close().catch(() => {});
           return res.json({ success: false, steps });
         }
+      }
+
+      if (originalId && !finalId) {
+        setStep('Active Browsing Session Check (Playwright)', 'failed', `Redirect Mismatch! Original ${platform} URL contained ID ${originalId}, but redirected URL contains no valid ID: ${finalUrl}`);
+        await context.close().catch(() => {});
+        return res.json({ success: false, steps });
+      }
+
+      if (originalId && finalId && originalId !== finalId) {
+        setStep('Active Browsing Session Check (Playwright)', 'failed', `Redirect Mismatch! Original ${platform} ID ${originalId} redirected to a different ID ${finalId}`);
+        await context.close().catch(() => {});
+        return res.json({ success: false, steps });
       }
 
       setStep('Active Browsing Session Check (Playwright)', 'success', `${connectivityMessage} Navigation completed successfully without access blocks.`, { finalUrl, httpStatus, redirectDetected });
@@ -883,7 +1044,57 @@ async function startServer() {
         return res.json({ success: false, steps });
       }
 
-      setStep('Metadata & Text Content Extraction Check', 'success', `Extraction successful! Title: "${extractionRes.title}", Client: "${extractionRes.clientName}", Budget: "${extractionRes.budget}"`, extractionRes);
+      let boardTitle = extractBoardTitleFromKhamsatUrl(url);
+      let boardSnippet = '';
+      let boardCategory = '';
+
+      const existingOp = db.getOpportunities().find(o => o.link === url || o.originalUrl === url || o.finalUrl === url);
+      if (existingOp) {
+        boardTitle = existingOp.boardTitle || boardTitle;
+        boardSnippet = existingOp.boardSnippet || '';
+        boardCategory = existingOp.boardCategory || '';
+      }
+
+      let similarityData: any = null;
+      if (platform === 'Khamsat' && boardTitle) {
+        const semResult = validateSemanticConsistency(
+          boardTitle,
+          extractionRes.title,
+          boardSnippet || boardTitle,
+          extractionRes.description,
+          boardCategory || 'تطوير مواقع وتطبيقات',
+          extractionRes.category || 'تطوير مواقع وتطبيقات'
+        );
+
+        similarityData = {
+          boardTitle,
+          boardSnippet: boardSnippet || boardTitle,
+          boardCategory: boardCategory || 'تطوير مواقع وتطبيقات',
+          liveTitle: extractionRes.title,
+          liveCategory: extractionRes.category || 'تطوير مواقع وتطبيقات',
+          titleSimilarity: semResult.titleSimilarity,
+          descriptionSimilarity: semResult.descriptionSimilarity,
+          categoryMatch: semResult.categoryMatch,
+          valid: semResult.valid,
+          validationReason: semResult.validationReason
+        };
+
+        if (!semResult.valid) {
+          setStep(
+            'Metadata & Text Content Extraction Check',
+            'failed',
+            `CONTENT MISMATCH DETECTED! Board request ("${boardTitle}") does not match loaded page request ("${extractionRes.title}"). Title Similarity: ${semResult.titleSimilarity}%, Description Similarity: ${semResult.descriptionSimilarity}%, Category Match: ${semResult.categoryMatch ? 'Yes' : 'No'}.`,
+            similarityData
+          );
+          await context.close().catch(() => {});
+          return res.json({ success: false, steps });
+        }
+      }
+
+      setStep('Metadata & Text Content Extraction Check', 'success', `Extraction successful! Title: "${extractionRes.title}", Client: "${extractionRes.clientName}", Budget: "${extractionRes.budget}"`, {
+        ...extractionRes,
+        similarityData
+      });
 
     } catch (err: any) {
       setStep('Metadata & Text Content Extraction Check', 'failed', `DOM query failed: ${err.message}`);
@@ -904,6 +1115,9 @@ async function startServer() {
 
       await context.close().catch(() => {});
 
+      const existingOp = db.getOpportunities().find(o => o.link === url || o.originalUrl === url || o.finalUrl === url);
+      const bTitle = existingOp?.boardTitle || extractBoardTitleFromKhamsatUrl(url);
+
       res.json({
         success: true,
         steps,
@@ -916,6 +1130,8 @@ async function startServer() {
           category: extractionRes.category,
           description: extractionRes.description,
           language: extractionRes.language,
+          period: extractionRes.period,
+          cost: extractionRes.budget ? (extractionRes.budget.match(/\d+/) ? parseInt(extractionRes.budget.match(/\d+/)![0], 10) : undefined) : undefined,
           validationStatus: 'VALID',
           validationReason: null,
           originalUrl: url,
@@ -924,7 +1140,15 @@ async function startServer() {
           finalServiceId: extractKhamsatId(finalUrl) || '',
           redirectDetected: url !== finalUrl,
           publishedAt: extractionRes.publishedAt,
-          lastValidatedAt: new Date().toISOString()
+          lastValidatedAt: new Date().toISOString(),
+          boardTitle: bTitle || undefined,
+          boardSnippet: existingOp?.boardSnippet || undefined,
+          boardCategory: existingOp?.boardCategory || undefined,
+          liveTitle: extractionRes.title,
+          liveCategory: extractionRes.category,
+          titleSimilarity: existingOp?.titleSimilarity || 100,
+          descriptionSimilarity: existingOp?.descriptionSimilarity || 100,
+          semanticValidation: true
         }
       });
     } catch (err: any) {
@@ -956,6 +1180,16 @@ async function startServer() {
       db.addLog('info', 'gemini', `Generating AI tailored bid proposal for "${op.title}"...`);
       const content = await writeProposal(profile, op, tone, length);
 
+      let defaultCost: number | undefined;
+      let defaultPeriod: number | undefined;
+
+      if (op.platform === 'Mostaql') {
+        const budgetStr = op.budget || '';
+        const matches = budgetStr.match(/\d+/g);
+        defaultCost = op.cost || (matches && matches.length > 0 ? parseInt(matches[0], 10) : 25);
+        defaultPeriod = op.period || 10;
+      }
+
       const propId = `prop-${Date.now()}`;
       const newProposal: Proposal = {
         id: propId,
@@ -964,7 +1198,9 @@ async function startServer() {
         tone: tone || profile.proposalTone,
         length: length || profile.proposalLength,
         status: 'draft',
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        cost: defaultCost,
+        period: defaultPeriod
       };
 
       db.addProposal(newProposal);
@@ -1126,6 +1362,24 @@ async function startServer() {
         detectedPath: detectedPath || null,
         configuredPath: db.getAutomationSettings().chromePath || null
       });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Serve debug screenshots for auto-submitted proposals
+  app.get('/api/screenshots/:filename', (req, res) => {
+    try {
+      const filename = req.params.filename;
+      if (filename.includes('..') || filename.includes('/') || filename.includes('\\')) {
+        return res.status(400).json({ error: 'Invalid filename' });
+      }
+      const screenshotPath = path.join(process.cwd(), 'data', 'screenshots', filename);
+      if (fs.existsSync(screenshotPath)) {
+        res.sendFile(screenshotPath);
+      } else {
+        res.status(404).json({ error: 'Screenshot not found' });
+      }
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }

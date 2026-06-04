@@ -65,12 +65,13 @@ export interface Opportunity {
   description: string;
   language: 'ar' | 'en';
   timestamp: string;
-  status: 'new' | 'ignored' | 'queued' | 'approved' | 'submitted' | 'rejected' | 'ACTIVE' | 'INACTIVE' | 'CLOSED' | 'PRIVATE' | 'DELETED' | 'UNAVAILABLE' | 'REDIRECTED' | 'INVALID';
+  status: 'new' | 'ignored' | 'queued' | 'approved' | 'submitted' | 'rejected' | 'ACTIVE' | 'INACTIVE' | 'CLOSED' | 'PRIVATE' | 'DELETED' | 'UNAVAILABLE' | 'REDIRECTED' | 'INVALID' | 'soft_invalid' | 'SOFT_INVALID';
   matchAnalysis?: MatchAnalysis;
   proposalId?: string;
   hidden?: boolean;
   publishedAt?: string;
   isActive?: boolean;
+  sourceType?: 'REAL' | 'SIMULATED';
   validationStatus?: 'VALID' | 'INVALID' | 'PRIVATE' | 'CLOSED' | 'DELETED' | 'UNAVAILABLE' | 'INACTIVE' | 'PENDING' | 'REDIRECTED';
   validationReason?: string | null;
   canonicalUrl?: string;
@@ -80,6 +81,25 @@ export interface Opportunity {
   serviceId?: string;
   finalServiceId?: string;
   redirectDetected?: boolean;
+  pageType?: 'REQUEST' | 'SERVICE' | 'USER_PROFILE' | 'CATEGORY' | 'PROJECT' | 'PROFILE' | 'COMPANY' | 'BUYER_REQUEST' | 'BRIEF' | 'GIG' | 'UNKNOWN';
+  platformId?: string;
+  canApply?: boolean;
+  redirectChain?: string[];
+  debugScreenshotPath?: string;
+  pageTitle?: string;
+  pageContentSnippet?: string;
+  healthScore?: number;
+  boardTitle?: string;
+  boardSnippet?: string;
+  boardCategory?: string;
+  liveTitle?: string;
+  liveCategory?: string;
+  titleSimilarity?: number;
+  descriptionSimilarity?: number;
+  semanticValidation?: boolean;
+  semanticValidationReason?: string;
+  period?: number;
+  cost?: number;
 }
 
 export interface Proposal {
@@ -92,6 +112,11 @@ export interface Proposal {
   timestamp: string;
   cooldownUntil?: string;
   submittedPlatformLink?: string;
+  submissionDebugScreenshots?: { title: string; filename: string; timestamp: string }[];
+  submissionError?: string;
+  archived?: boolean;
+  cost?: number;
+  period?: number;
 }
 
 export interface TelegramSettings {
@@ -148,5 +173,31 @@ export interface ConnectedAccount {
   lastValidation?: string;
   errorMessage?: string;
   profileLocation?: string;
+  cookiesJson?: string;
 }
+
+export interface PlatformScraperStats {
+  platform: 'Khamsat' | 'Mostaql' | 'Fiverr';
+  candidatesDiscovered: number;
+  validationPassed: number;
+  validationFailed: number;
+  redirected: number;
+  closed: number;
+  deleted: number;
+  private: number;
+  contentMismatch: number;
+  cannotApply: number;
+  softInvalid: number;
+  realCount: number;
+  simulatedCount: number;
+  highMatchCount: number;
+  proposalCapableCount: number;
+}
+
+export interface ScraperAnalytics {
+  platformStats: Record<'Khamsat' | 'Mostaql' | 'Fiverr', PlatformScraperStats>;
+  topSkills: Record<string, number>;
+  acquisitionScore: number;
+}
+
 
