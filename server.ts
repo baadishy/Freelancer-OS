@@ -96,7 +96,7 @@ async function startServer() {
   await db.initFromPersistentStore();
 
   const app = express();
-  const PORT = 3000;
+  const PORT = 9000;
 
   // Real-time body parsers
   app.use(express.json({ limit: '10mb' }));
