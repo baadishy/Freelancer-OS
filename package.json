@@ -5,8 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",
-    "build": "vite build",
-    "start": "node server.ts",
+    "build": "npx playwright install && vite build",
+    "start": "npx playwright install && node server.ts",
     "lint": "tsc --noEmit",
     "test": "tsx test-system.ts"
   },
