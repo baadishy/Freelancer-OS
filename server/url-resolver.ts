@@ -356,10 +356,20 @@ export function calculateOpportunityHealth(data: Partial<ResolvedOpportunityData
 /**
  * Sweeps page contents to detect specific Arabic and English access failure triggers.
  */
-export function detectAccessRejections(platform: 'Khamsat' | 'Mostaql', text: string): { blocked: boolean; reason: string | null } {
+export function detectAccessRejections(platform: 'Khamsat' | 'Mostaql' | 'LinkedIn', text: string): { blocked: boolean; reason: string | null } {
   const normText = text.toLowerCase();
 
-  if (platform === 'Mostaql') {
+  if (platform === 'LinkedIn') {
+    if (normText.includes('no longer accepting applications') || normText.includes('closed') || normText.includes('job is closed') || normText.includes('no longer available')) {
+      return { blocked: true, reason: 'CLOSED' };
+    }
+    if (normText.includes('page not found') || normText.includes('this job was not found')) {
+      return { blocked: true, reason: 'NOT_FOUND' };
+    }
+    if (normText.includes('sign in') && normText.includes('authwall')) {
+      return { blocked: true, reason: 'PRIVATE' };
+    }
+  } else if (platform === 'Mostaql') {
     if (normText.includes('ليس لديك الصلاحيات') || normText.includes('ليس لديك صلاحية')) {
       return { blocked: true, reason: 'NO_PERMISSIONS' };
     }
@@ -397,7 +407,7 @@ export function detectAccessRejections(platform: 'Khamsat' | 'Mostaql', text: st
  * Universal Resolver & Opportunity Verifier Engine
  */
 export async function resolveAndValidateUrl(
-  platform: 'Khamsat' | 'Mostaql',
+  platform: 'Khamsat' | 'Mostaql' | 'LinkedIn',
   url: string,
   page: Page,
   expectedTitle?: string,
@@ -579,7 +589,9 @@ export async function resolveAndValidateUrl(
     // 6. Content Integrity Validation
     const titleSelectors = platform === 'Khamsat' 
       ? ['h1', '.service-title', '.topic-title', '.post-title', 'h2', 'main h1', '.discussion h1']
-      : ['h1', '.project-title', '.project-header h1', 'h1.meta-title', 'main h1', '#project-title'];
+      : platform === 'Mostaql'
+        ? ['h1', '.project-title', '.project-header h1', 'h1.meta-title', 'main h1', '#project-title']
+        : ['h1', '.job-details-jobs-unified-top-card__job-title', '.jobs-unified-top-card__job-title', '.top-card-layout__title', 'main h1'];
 
     const descSelectors = platform === 'Khamsat'
       ? ['.post-content', '.service-desc', '.topic-desc', '.details', '.comment_content', '.comment-text', 'article', '.discussion-post', '.post-desc']
@@ -598,7 +610,7 @@ export async function resolveAndValidateUrl(
             'article',
             '.card'
           ]
-        : ['.faq-description', '.gig-description', '.description', '.description-wrapper', 'article'];
+        : ['.jobs-description__container', '.jobs-description-content__text', '#job-details', '.show-more-less-html__markup', '.faq-description', '.gig-description', '.description', '.description-wrapper', 'article'];
 
     const clientSelectors = platform === 'Khamsat'
       ? ['a.sidebar_user', '.post-user a', 'a[href*="/user/"]', '.username']
@@ -612,7 +624,7 @@ export async function resolveAndValidateUrl(
             'a[href*="/u/"]',
             '.username'
           ]
-        : ['.seller-name', '.user-name', '.seller-username'];
+        : ['.jobs-unified-top-card__company-name', '.topcard__org-name-link', '.job-details-jobs-unified-top-card__company-name a', '.seller-name', '.user-name', '.seller-username'];
 
     let extractedTitle = '';
     for (const sel of titleSelectors) {
@@ -668,7 +680,18 @@ export async function resolveAndValidateUrl(
     let category = 'Web Development';
     let language: 'ar' | 'en' = 'ar';
 
-    if (platform === 'Khamsat') {
+    if (platform === 'LinkedIn') {
+      language = 'en';
+      budget = await page.evaluate(() => {
+        const insight = document.querySelector('.job-details-jobs-unified-top-card__job-insight, .jobs-unified-top-card__job-insight, .top-card-layout__first-sub-header');
+        if (insight && insight.textContent && insight.textContent.match(/\$\d/)) {
+          const m = insight.textContent.match(/\$[\d,]+\s*(?:-\s*\$[\d,]+)?(?:\s*\/\s*\w+)?/gi);
+          if (m && m.length > 0) return m[0].trim();
+        }
+        return '$2,000 - $5,000';
+      }).catch(() => '$2,000 - $5,000');
+      category = 'Engineering & Technology';
+    } else if (platform === 'Khamsat') {
       const match = mainText.match(/(?:الميزانية|الميزانيه|المبلغ|السعر|بميزانية|بميزانيه|بحدود)\s*[:=]?\s*\$?\s*(\d+)\s*(?:-\s*\$?\s*(\d+))?/i);
       if (match) {
         budget = match[2] ? `$${match[1]} - $${match[2]}` : `$${match[1]}`;

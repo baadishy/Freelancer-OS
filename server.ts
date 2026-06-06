@@ -96,7 +96,7 @@ async function startServer() {
   await db.initFromPersistentStore();
 
   const app = express();
-  const PORT = 9000;
+  const PORT = 3000;
 
   // Real-time body parsers
   app.use(express.json({ limit: '10mb' }));
@@ -355,8 +355,8 @@ async function startServer() {
 
   app.post('/api/accounts/connect', async (req, res) => {
     const { platform } = req.body;
-    if (!platform || !['Khamsat', 'Mostaql'].includes(platform)) {
-      return res.status(400).json({ error: 'Valid platform (Khamsat, Mostaql) is required.' });
+    if (!platform || !['Khamsat', 'Mostaql', 'LinkedIn'].includes(platform)) {
+      return res.status(400).json({ error: 'Valid platform (Khamsat, Mostaql, LinkedIn) is required.' });
     }
     try {
       const screenshot = await playwrightSession.startSession(platform);
@@ -418,7 +418,7 @@ async function startServer() {
 
   app.post('/api/accounts/disconnect', async (req, res) => {
     const { platform } = req.body;
-    if (!platform || !['Khamsat', 'Mostaql'].includes(platform)) {
+    if (!platform || !['Khamsat', 'Mostaql', 'LinkedIn'].includes(platform)) {
       return res.status(400).json({ error: 'Valid platform is required.' });
     }
     try {
@@ -456,7 +456,7 @@ async function startServer() {
 
   app.post('/api/accounts/validate', async (req, res) => {
     const { platform } = req.body;
-    if (!platform || !['Khamsat', 'Mostaql'].includes(platform)) {
+    if (!platform || !['Khamsat', 'Mostaql', 'LinkedIn'].includes(platform)) {
       return res.status(400).json({ error: 'Valid platform is required.' });
     }
     try {
@@ -469,8 +469,8 @@ async function startServer() {
 
   app.post('/api/accounts/import-cookies', async (req, res) => {
     const { platform, cookies } = req.body;
-    if (!platform || !['Khamsat', 'Mostaql'].includes(platform)) {
-      return res.status(400).json({ error: 'Valid platform (Khamsat, Mostaql) is required.' });
+    if (!platform || !['Khamsat', 'Mostaql', 'LinkedIn'].includes(platform)) {
+      return res.status(400).json({ error: 'Valid platform (Khamsat, Mostaql, LinkedIn) is required.' });
     }
     if (!cookies) {
       return res.status(400).json({ error: 'Cookies data is required.' });
@@ -647,7 +647,8 @@ async function startServer() {
       const defaultAnalytics = {
         platformStats: {
           Khamsat: { platform: 'Khamsat', candidatesDiscovered: 0, validationPassed: 0, validationFailed: 0, redirected: 0, closed: 0, deleted: 0, private: 0, contentMismatch: 0, cannotApply: 0, softInvalid: 0, realCount: 0, simulatedCount: 0, highMatchCount: 0, proposalCapableCount: 0 },
-          Mostaql: { platform: 'Mostaql', candidatesDiscovered: 0, validationPassed: 0, validationFailed: 0, redirected: 0, closed: 0, deleted: 0, private: 0, contentMismatch: 0, cannotApply: 0, softInvalid: 0, realCount: 0, simulatedCount: 0, highMatchCount: 0, proposalCapableCount: 0 }
+          Mostaql: { platform: 'Mostaql', candidatesDiscovered: 0, validationPassed: 0, validationFailed: 0, redirected: 0, closed: 0, deleted: 0, private: 0, contentMismatch: 0, cannotApply: 0, softInvalid: 0, realCount: 0, simulatedCount: 0, highMatchCount: 0, proposalCapableCount: 0 },
+          LinkedIn: { platform: 'LinkedIn', candidatesDiscovered: 0, validationPassed: 0, validationFailed: 0, redirected: 0, closed: 0, deleted: 0, private: 0, contentMismatch: 0, cannotApply: 0, softInvalid: 0, realCount: 0, simulatedCount: 0, highMatchCount: 0, proposalCapableCount: 0 }
         },
         topSkills: {},
         acquisitionScore: 0
@@ -1406,10 +1407,10 @@ async function startServer() {
       const replies = Math.round(submitted * 0.4); // 40% response rate simulation
       const acceptanceRate = submitted > 0 ? Math.round((replies * 0.5) / submitted * 100) : 0;
 
-      const platformsBreakdown = { Khamsat: 0, Mostaql: 0 };
+      const platformsBreakdown = { Khamsat: 0, Mostaql: 0, LinkedIn: 0 };
       ops.forEach(o => {
         if (o.platform in platformsBreakdown) {
-          platformsBreakdown[o.platform as 'Khamsat' | 'Mostaql']++;
+          platformsBreakdown[o.platform as 'Khamsat' | 'Mostaql' | 'LinkedIn']++;
         }
       });
 

@@ -109,7 +109,7 @@ export function detectChromePath(): string | undefined {
  * Helper to launch a persistent Playwright browser context using the detected Chrome browser 
  * and persistent storage directories per platform to maintain cookies/sessions across restarts.
  */
-export async function launchPlaywrightPersistent(platform: 'Khamsat' | 'Mostaql', isInteractive: boolean = false): Promise<BrowserContext> {
+export async function launchPlaywrightPersistent(platform: 'Khamsat' | 'Mostaql' | 'LinkedIn', isInteractive: boolean = false): Promise<BrowserContext> {
   const profileDir = path.join(process.cwd(), 'data', 'browser-profiles', platform.toLowerCase());
   
   // Ensure profile directory exists
@@ -282,9 +282,9 @@ export async function launchPlaywrightPersistent(platform: 'Khamsat' | 'Mostaql'
 class PlaywrightSessionManager {
   private context: BrowserContext | null = null;
   private page: Page | null = null;
-  private platform: 'Khamsat' | 'Mostaql' | null = null;
+  private platform: 'Khamsat' | 'Mostaql' | 'LinkedIn' | null = null;
 
-  public async startSession(platform: 'Khamsat' | 'Mostaql'): Promise<string> {
+  public async startSession(platform: 'Khamsat' | 'Mostaql' | 'LinkedIn'): Promise<string> {
     // If there is an existing session, close it first
     await this.closeSession();
 
@@ -299,6 +299,8 @@ class PlaywrightSessionManager {
       startUrl = 'https://khamsat.com/community/requests';
     } else if (platform === 'Mostaql') {
       startUrl = 'https://mostaql.com/projects';
+    } else if (platform === 'LinkedIn') {
+      startUrl = 'https://www.linkedin.com/jobs';
     }
 
     db.addLog('info', 'system', `Launching interactive persistent context session to connect ${platform}...`);
@@ -416,6 +418,19 @@ class PlaywrightSessionManager {
             username = href?.split('/').pop() || 'Mostaql User';
           }
         }
+      } else if (this.platform === 'LinkedIn') {
+        const loginPresent = url.includes('/login') || url.includes('/register') || url.includes('/signin') || url.includes('linkedin.com/checkpoint/lg');
+        const userMenu = await this.page.$('#global-nav-typeahead, .global-nav__me, .global-nav__primary-link, a[href*="/in/"]');
+        if (userMenu || (!loginPresent && (url.includes('/jobs') || url.includes('/feed') || url.includes('/in/')))) {
+          authenticated = true;
+          const userElem = await this.page.$('a[href*="/in/"]');
+          if (userElem) {
+            const href = await userElem.getAttribute('href');
+            username = href?.split('/in/').pop()?.replace(/\//g, '') || 'LinkedIn User';
+          } else {
+            username = 'LinkedIn User';
+          }
+        }
       }
     } catch (e) {
       console.warn('Auth status evaluation exception:', e);
@@ -480,7 +495,7 @@ export const playwrightSession = new PlaywrightSessionManager();
 /**
  * Validates whether the persistent session is still authenticated.
  */
-export async function validatePlatformSession(platform: 'Khamsat' | 'Mostaql'): Promise<{ status: string; username?: string; error?: string }> {
+export async function validatePlatformSession(platform: 'Khamsat' | 'Mostaql' | 'LinkedIn'): Promise<{ status: string; username?: string; error?: string }> {
   const profileDir = path.join(process.cwd(), 'data', 'browser-profiles', platform.toLowerCase());
   
   if (!fs.existsSync(profileDir)) {
@@ -499,6 +514,8 @@ export async function validatePlatformSession(platform: 'Khamsat' | 'Mostaql'): 
       checkUrl = 'https://khamsat.com/community/requests';
     } else if (platform === 'Mostaql') {
       checkUrl = 'https://mostaql.com/projects';
+    } else if (platform === 'LinkedIn') {
+      checkUrl = 'https://www.linkedin.com/jobs';
     }
 
     await page.goto(checkUrl, { waitUntil: 'domcontentloaded', timeout: 20000 });
@@ -540,6 +557,19 @@ export async function validatePlatformSession(platform: 'Khamsat' | 'Mostaql'): 
         if (userElem) {
           const href = await userElem.getAttribute('href');
           username = href?.split('/').pop() || 'Connected User';
+        }
+      }
+    } else if (platform === 'LinkedIn') {
+      const loginPresent = url.includes('/login') || url.includes('/register') || url.includes('/signin') || url.includes('linkedin.com/checkpoint/lg');
+      const userMenu = await page.$('#global-nav-typeahead, .global-nav__me, .global-nav__primary-link, a[href*="/in/"]');
+      if (userMenu || (!loginPresent && (url.includes('/jobs') || url.includes('/feed') || url.includes('/in/')))) {
+        authenticated = true;
+        const userElem = await page.$('a[href*="/in/"]');
+        if (userElem) {
+          const href = await userElem.getAttribute('href');
+          username = href?.split('/in/').pop()?.replace(/\//g, '') || 'Connected User';
+        } else {
+          username = 'Connected User';
         }
       }
     }
@@ -1271,7 +1301,7 @@ export async function extractKhamsatOpportunity(page: Page, url: string): Promis
 }
 
 export async function validateOpportunity(
-  platform: 'Khamsat' | 'Mostaql',
+  platform: 'Khamsat' | 'Mostaql' | 'LinkedIn',
   url: string,
   existingPage?: Page,
   expectedTitle?: string,
@@ -1345,7 +1375,7 @@ export async function validateOpportunity(
 /**
  * Scrapes project lists from the freelance platform using the persistent Chrome session profile.
  */
-export async function scrapePlatformJobsPlaywright(platform: 'Khamsat' | 'Mostaql', skills?: string[]): Promise<any[]> {
+export async function scrapePlatformJobsPlaywright(platform: 'Khamsat' | 'Mostaql' | 'LinkedIn', skills?: string[]): Promise<any[]> {
   const profileDir = path.join(process.cwd(), 'data', 'browser-profiles', platform.toLowerCase());
   
   if (!fs.existsSync(profileDir)) {
@@ -1374,6 +1404,11 @@ export async function scrapePlatformJobsPlaywright(platform: 'Khamsat' | 'Mostaq
       targetUrls.push('https://mostaql.com/projects?category=development&sort=latest&page=2');
       activeSkills.slice(0, 3).forEach(skill => {
         targetUrls.push(`https://mostaql.com/projects?keyword=${encodeURIComponent(skill)}&sort=latest`);
+      });
+    } else if (platform === 'LinkedIn') {
+      targetUrls.push('https://www.linkedin.com/jobs/search?keywords=Freelance&location=Remote');
+      activeSkills.slice(0, 3).forEach(skill => {
+        targetUrls.push(`https://www.linkedin.com/jobs/search?keywords=${encodeURIComponent('Freelance ' + skill)}&location=Remote`);
       });
     }
 
@@ -1658,7 +1693,7 @@ export async function scrapePlatformJobsPlaywright(platform: 'Khamsat' | 'Mostaq
  * and runs standard authentication verification.
  */
 export async function importCookiesToPlatform(
-  platform: 'Khamsat' | 'Mostaql',
+  platform: 'Khamsat' | 'Mostaql' | 'LinkedIn',
   cookiesList: any[]
 ): Promise<{ success: boolean; username?: string; error?: string }> {
   const profileDir = path.join(process.cwd(), 'data', 'browser-profiles', platform.toLowerCase());
@@ -1688,6 +1723,8 @@ export async function importCookiesToPlatform(
         cDomain = '.khamsat.com';
       } else if (platform === 'Mostaql' && !cDomain.includes('mostaql.com')) {
         cDomain = '.mostaql.com';
+      } else if (platform === 'LinkedIn' && !cDomain.includes('linkedin.com')) {
+        cDomain = '.linkedin.com';
       }
 
       // Safe expiration mapping

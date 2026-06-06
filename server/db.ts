@@ -118,7 +118,8 @@ const INITIAL_DB_STATE: Schema = {
   ],
   accounts: [
     { platform: 'Khamsat', status: 'DISCONNECTED' },
-    { platform: 'Mostaql', status: 'DISCONNECTED' }
+    { platform: 'Mostaql', status: 'DISCONNECTED' },
+    { platform: 'LinkedIn', status: 'DISCONNECTED' }
   ]
 };
 
@@ -158,7 +159,8 @@ class LocalDB {
         logs: loaded.logs || [],
         accounts: loaded.accounts || [
           { platform: 'Khamsat', status: 'DISCONNECTED' },
-          { platform: 'Mostaql', status: 'DISCONNECTED' }
+          { platform: 'Mostaql', status: 'DISCONNECTED' },
+          { platform: 'LinkedIn', status: 'DISCONNECTED' }
         ]
       };
       
@@ -280,20 +282,25 @@ class LocalDB {
 
   // --- Account Connection Utilities ---
   public getAccounts(userEmail?: string): ConnectedAccount[] {
-    return (this.getUserDataOf(userEmail).accounts || [
-      { platform: 'Khamsat', status: 'DISCONNECTED' },
-      { platform: 'Mostaql', status: 'DISCONNECTED' }
-    ]);
+    const list = this.getUserDataOf(userEmail).accounts || [];
+    // Ensure all three platforms exist
+    const platforms: Array<'Khamsat' | 'Mostaql' | 'LinkedIn'> = ['Khamsat', 'Mostaql', 'LinkedIn'];
+    platforms.forEach(p => {
+      if (!list.some(a => a.platform === p)) {
+        list.push({ platform: p, status: 'DISCONNECTED' });
+      }
+    });
+    return list;
   }
 
-  public getAccount(platform: 'Khamsat' | 'Mostaql', userEmail?: string): ConnectedAccount {
+  public getAccount(platform: 'Khamsat' | 'Mostaql' | 'LinkedIn', userEmail?: string): ConnectedAccount {
     const accounts = this.getAccounts(userEmail);
     const existing = accounts.find(a => a.platform === platform);
     if (existing) return existing;
     return { platform, status: 'DISCONNECTED' };
   }
 
-  public updateAccount(platform: 'Khamsat' | 'Mostaql', updates: Partial<ConnectedAccount>, userEmail?: string): ConnectedAccount {
+  public updateAccount(platform: 'Khamsat' | 'Mostaql' | 'LinkedIn', updates: Partial<ConnectedAccount>, userEmail?: string): ConnectedAccount {
     const userState = this.getUserDataOf(userEmail);
     const accounts = [...(userState.accounts || [])];
     const idx = accounts.findIndex(a => a.platform === platform);

@@ -42,6 +42,23 @@ const SEED_ANALYTICS: ScraperAnalytics = {
       simulatedCount: 17,
       highMatchCount: 14,
       proposalCapableCount: 30
+    },
+    LinkedIn: {
+      platform: 'LinkedIn',
+      candidatesDiscovered: 80,
+      validationPassed: 60,
+      validationFailed: 20,
+      redirected: 5,
+      closed: 5,
+      deleted: 2,
+      private: 2,
+      contentMismatch: 2,
+      cannotApply: 4,
+      softInvalid: 0,
+      realCount: 30,
+      simulatedCount: 15,
+      highMatchCount: 22,
+      proposalCapableCount: 28
     }
   },
   topSkills: {
@@ -145,7 +162,7 @@ export function saveScraperAnalytics(analytics: ScraperAnalytics, userEmail?: st
  * Records a single outcome from a crawler discovery candidates scan
  */
 export function recordDiscovery(
-  platform: 'Khamsat' | 'Mostaql',
+  platform: 'Khamsat' | 'Mostaql' | 'LinkedIn',
   metrics: {
     candidatesDiscovered?: number;
     passed?: boolean;

@@ -14,6 +14,7 @@ export interface PortfolioProject {
 export interface PlatformCookies {
   khamsat?: string;
   mostaql?: string;
+  linkedin?: string;
 }
 
 export interface FreelancerProfile {
@@ -56,7 +57,7 @@ export interface MatchAnalysis {
 export interface Opportunity {
   id: string;
   title: string;
-  platform: 'Khamsat' | 'Mostaql';
+  platform: 'Khamsat' | 'Mostaql' | 'LinkedIn';
   link: string;
   budget: string;
   clientName: string;
@@ -159,13 +160,14 @@ export interface DashboardStats {
   platformsBreakdown: {
     Khamsat: number;
     Mostaql: number;
+    LinkedIn: number;
   };
 }
 
 export type ConnectedAccountStatus = 'CONNECTED' | 'DISCONNECTED' | 'EXPIRED' | 'LOGIN_REQUIRED' | 'ERROR';
 
 export interface ConnectedAccount {
-  platform: 'Khamsat' | 'Mostaql';
+  platform: 'Khamsat' | 'Mostaql' | 'LinkedIn';
   status: ConnectedAccountStatus;
   username?: string;
   lastLogin?: string;
@@ -176,7 +178,7 @@ export interface ConnectedAccount {
 }
 
 export interface PlatformScraperStats {
-  platform: 'Khamsat' | 'Mostaql';
+  platform: 'Khamsat' | 'Mostaql' | 'LinkedIn';
   candidatesDiscovered: number;
   validationPassed: number;
   validationFailed: number;
@@ -194,7 +196,7 @@ export interface PlatformScraperStats {
 }
 
 export interface ScraperAnalytics {
-  platformStats: Record<'Khamsat' | 'Mostaql', PlatformScraperStats>;
+  platformStats: Record<'Khamsat' | 'Mostaql' | 'LinkedIn', PlatformScraperStats>;
   topSkills: Record<string, number>;
   acquisitionScore: number;
 }
