@@ -63,14 +63,6 @@ export class PlatformPlaywrightAutomation {
     await this.delay(800, 1800);
     return [];
   }
-
-  /**
-   * Scrapes Fiverr gigs/requests list with dynamic scrolls and captcha defense headers
-   */
-  public async scrapeFiverr(): Promise<any[]> {
-    await this.delay(1500, 3000);
-    return [];
-  }
 }
 
 /**
@@ -107,7 +99,7 @@ const CATEGORIES = ['Web Development', 'Browser Automation', 'Backend APIs', 'Sa
  * Triggers full scrape routine
  */
 export async function triggerActivePlatformsScrape(): Promise<number> {
-  db.addLog('info', 'scraper', 'Scanning Fiverr, Mostaql, and Khamsat platforms for new projects...');
+  db.addLog('info', 'scraper', 'Scanning Mostaql and Khamsat platforms for new projects...');
   
   const automation = new PlatformPlaywrightAutomation();
   const profile = db.getProfile();
@@ -115,7 +107,7 @@ export async function triggerActivePlatformsScrape(): Promise<number> {
 
   const foundJobs: Opportunity[] = [];
 
-  // 1. Khamsat Scrape Flow (Real Playwright or simulation fallback)
+  // 1. Khamsat Scrape Flow (Real Playwright only)
   try {
     const realKhamsat = await scrapePlatformJobsPlaywright('Khamsat', profile.skills);
     if (realKhamsat.length > 0) {
@@ -164,37 +156,13 @@ export async function triggerActivePlatformsScrape(): Promise<number> {
         });
       });
     } else {
-      const countKhamsat = 1 + Math.floor(Math.random() * 3);
-      for (let i = 0; i < countKhamsat; i++) {
-        const id = `kh-job-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-        const title = MOCK_TITLES_AR[Math.floor(Math.random() * MOCK_TITLES_AR.length)];
-        const client = CLIENT_NAMES[Math.floor(Math.random() * CLIENT_NAMES.length)];
-        const skillMatch = profile.skills[Math.floor(Math.random() * profile.skills.length)] || 'تطوير ويب';
-        const cleanSlug = encodeURIComponent(title.toLowerCase().replace(/[^a-z0-9\u0600-\u06FF]+/g, '-'));
-        
-        foundJobs.push({
-          id,
-          title,
-          platform: 'Khamsat',
-          link: `https://khamsat.com/community/requests/${Math.floor(100000 + Math.random() * 900000)}-${cleanSlug}`,
-          budget: `$50 - $${50 + Math.floor(Math.random() * 4) * 25}`,
-          clientName: client,
-          category: 'تطوير مواقع وتطبيقات',
-          description: `مطلوب تنفيذ هذا المشروع بأسرع وقت ممكن. يجب أن يمتلك المستقل خبرة ممتازة في التعامل مع اللغات البرمجية والتقنيات الحديثة وبالتحديد ${skillMatch}. تفاصيل العمل تشمل بناء لوحة تحكم، معالجة طلبات المستخدمين وربط السيرفر. الدعم الفني بعد التسليم مطلوب.`,
-          language: 'ar',
-          timestamp: new Date(Date.now() - i * 2 * 3600000).toISOString(),
-          status: 'new',
-          publishedAt: i === 0 ? 'منذ دقيقة' : `منذ ${i * 3} ساعات و${15 + i * 7} دقيقة`,
-          isActive: true,
-          sourceType: 'SIMULATED'
-        });
-      }
+      db.addLog('info', 'scraper', 'No live jobs found on Khamsat Community Requests currently.');
     }
   } catch (err: any) {
-    db.addLog('warning', 'scraper', `Khamsat Playwright crawl failure: ${err.message}. Fallen back to simulated stream.`);
+    db.addLog('error', 'scraper', `Khamsat Playwright crawl failure: ${err.message}.`);
   }
 
-  // 2. Mostaql Scrape Flow (Real Playwright or simulation fallback)
+  // 2. Mostaql Scrape Flow (Real Playwright only)
   try {
     const realMostaql = await scrapePlatformJobsPlaywright('Mostaql', profile.skills);
     if (realMostaql.length > 0) {
@@ -244,139 +212,17 @@ export async function triggerActivePlatformsScrape(): Promise<number> {
         });
       });
     } else {
-      const countMostaql = 1 + Math.floor(Math.random() * 3);
-      for (let i = 0; i < countMostaql; i++) {
-        const id = `mos-job-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-        const title = MOCK_TITLES_AR[(i + 1) % MOCK_TITLES_AR.length];
-        const client = CLIENT_NAMES[Math.floor(Math.random() * CLIENT_NAMES.length)];
-        const skillMatch1 = profile.skills[0] || 'React';
-        const skillMatch2 = profile.skills[1] || 'Express';
-        const cleanSlug = encodeURIComponent(title.toLowerCase().replace(/[^a-z0-9\u0600-\u06FF]+/g, '-'));
-
-        foundJobs.push({
-          id,
-          title,
-          platform: 'Mostaql',
-          link: `https://mostaql.com/project/${Math.floor(100000 + Math.random() * 900000)}-${cleanSlug}`,
-          budget: `$${250 + Math.floor(Math.random() * 10) * 100} - $${1000 + Math.floor(Math.random() * 5) * 500}`,
-          clientName: client,
-          category: 'برمجة وتطوير المواقع',
-          description: `السلام عليكم ورحمة الله وبركاته، نقوم حاليًا بتأسيس موقع يعتمد تقنيات الويب الحديثة ونرغب في التعاقد مع مبرمج ومطور يمتلك مهارات احترافية في ${skillMatch1} و ${skillMatch2}. يرجى توضيح معرض أعمالك والمدة المتوقعة لتسليم المشروع بالكامل.`,
-          language: 'ar',
-          timestamp: new Date(Date.now() - i * 3 * 3600000).toISOString(),
-          status: 'new',
-          publishedAt: i === 0 ? 'Just now' : `${i * 3} hours ago`,
-          isActive: true,
-          period: 5 + Math.floor(Math.random() * 25),
-          sourceType: 'SIMULATED'
-        });
-      }
+      db.addLog('info', 'scraper', 'No live jobs found on Mostaql Project Board currently.');
     }
   } catch (err: any) {
-    db.addLog('warning', 'scraper', `Mostaql Playwright crawl failure: ${err.message}. Fallen back to simulated stream.`);
+    db.addLog('error', 'scraper', `Mostaql Playwright crawl failure: ${err.message}.`);
   }
 
-  // 3. Fiverr Scrape Flow (Real Playwright or simulation fallback)
-  try {
-    const realFiverr = await scrapePlatformJobsPlaywright('Fiverr', profile.skills);
-    if (realFiverr.length > 0) {
-      db.addLog('success', 'scraper', `Playwright successfully extracted ${realFiverr.length} active live opportunities from Fiverr listing page!`);
-      realFiverr.forEach((job, idx) => {
-        foundJobs.push({
-          id: `fiv-real-${Date.now()}-${idx}-${Math.floor(Math.random() * 1000)}`,
-          title: job.title,
-          platform: 'Fiverr',
-          link: job.link,
-          budget: job.budget,
-          clientName: job.clientName,
-          category: job.category,
-          description: job.description,
-          language: job.language,
-          timestamp: new Date().toISOString(),
-          status: 'new',
-          publishedAt: 'Just now',
-          isActive: true,
-          validationStatus: job.validationStatus,
-          validationReason: job.validationReason,
-          lastValidatedAt: job.lastValidatedAt,
-          originalUrl: job.originalUrl,
-          finalUrl: job.finalUrl,
-          serviceId: job.serviceId,
-          finalServiceId: job.finalServiceId,
-          redirectDetected: job.redirectDetected,
-          pageType: job.pageType,
-          platformId: job.platformId,
-          canApply: job.canApply,
-          redirectChain: job.redirectChain,
-          healthScore: job.healthScore,
-          debugScreenshotPath: job.debugScreenshotPath,
-          pageTitle: job.pageTitle,
-          pageContentSnippet: job.pageContentSnippet,
-          boardTitle: job.boardTitle,
-          boardSnippet: job.boardSnippet,
-          boardCategory: job.boardCategory,
-          liveTitle: job.liveTitle,
-          liveCategory: job.liveCategory,
-          titleSimilarity: job.titleSimilarity,
-          descriptionSimilarity: job.descriptionSimilarity,
-          semanticValidation: job.semanticValidation,
-          semanticValidationReason: job.semanticValidationReason,
-          sourceType: 'REAL'
-        });
-      });
-    } else {
-      const countFiverr = 1 + Math.floor(Math.random() * 2);
-      for (let i = 0; i < countFiverr; i++) {
-        const id = `fiv-job-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-        const title = MOCK_TITLES_EN[Math.floor(Math.random() * MOCK_TITLES_EN.length)];
-        const client = CLIENT_NAMES[Math.floor(Math.random() * CLIENT_NAMES.length)];
-        const skillMatch = profile.skills[Math.floor(Math.random() * profile.skills.length)] || 'Web Optimization';
-        const cleanSlug = encodeURIComponent(title.toLowerCase().replace(/[^a-z0-9]+/g, '-'));
 
-        foundJobs.push({
-          id,
-          title,
-          platform: 'Fiverr',
-          link: `https://www.fiverr.com/services/${cleanSlug}-${Math.floor(100000 + Math.random() * 900000)}`,
-          budget: `$${100 + Math.floor(Math.random() * 8) * 50}`,
-          clientName: client,
-          category: CATEGORIES[Math.floor(Math.random() * CATEGORIES.length)],
-          description: `Hello, looking for a capable freelancer to implement some custom optimizations. Your skill in ${skillMatch} is highly valued here. We need secure routes, optimized data responses, responsive viewports, and clean code documentation. Looking to start within the next 48 hours. Let me know if you are free.`,
-          language: 'en',
-          timestamp: new Date(Date.now() - i * 4 * 3600000).toISOString(),
-          status: 'new',
-          publishedAt: i === 0 ? 'Just now' : `${i * 4} hours ago`,
-          isActive: true,
-          sourceType: 'SIMULATED'
-        });
-      }
-    }
-  } catch (err: any) {
-    db.addLog('warning', 'scraper', `Fiverr Playwright crawl failure: ${err.message}. Fallen back to simulated stream.`);
-  }
 
   // Save jobs to database and trigger AI analysis automatically
   let addedCount = 0;
   for (const job of foundJobs) {
-    // ----------------------------------------
-    // PIPELINE STAGE: SIMULATED vs REAL HANDLER
-    // ----------------------------------------
-    if (job.sourceType === 'SIMULATED') {
-      // Simulated sandbox mock entries bypass live Playwright validations & block network checks
-      job.validationStatus = 'VALID';
-      job.validationReason = null;
-      job.lastValidatedAt = new Date().toISOString();
-      
-      const added = db.addOpportunity(job);
-      if (added.status === 'new') {
-        addedCount++;
-        db.addLog('success', 'scraper', `[SANDBOX SAVE] Saved simulated sandbox option to feed: "${job.title}"`);
-      }
-      continue;
-    }
-
-    // Real opportunities undergo validation & high-fidelity checks
-    db.addLog('info', 'scraper', `[PRE-SAVE PROCESS] Running live browser validation on parsed opportunity: "${job.title}" (${job.link})`);
     
     // Call the validation exactly like revalidate-all
     const validationResult = await validateOpportunity(job.platform, job.link, undefined, job.title, {
@@ -396,7 +242,8 @@ export async function triggerActivePlatformsScrape(): Promise<number> {
       job.finalUrl = details.finalUrl || job.finalUrl;
       job.pageType = details.pageType || job.pageType;
       job.platformId = details.platformId || job.platformId;
-      job.canApply = details.canApply !== undefined ? details.canApply : true;
+      job.canApply = true;
+      job.bidLimitReached = details.bidLimitReached || false;
       job.redirectDetected = details.redirectDetected || false;
       job.redirectChain = details.redirectChain || [];
       job.healthScore = details.healthScore !== undefined ? details.healthScore : 100;
@@ -430,7 +277,25 @@ export async function triggerActivePlatformsScrape(): Promise<number> {
         continue;
       }
 
-      db.addLog('warning', 'scraper', `[PRE-SAVE REJECT & SKIP] Skipped saving invalid, ended or incorrect opportunity: "${job.title}" (Reason: ${failReason}).`);
+      const detailedReasonsMap: Record<string, string> = {
+        'INVALID_PAGE': 'The page URL pattern is invalid/incorrect, or failed to resolve/load inside the browser session.',
+        'NOT_FOUND': 'The project, community request or freelancer service does not exist on the platform anymore (HTTP 404).',
+        'CLOSED': 'The project thread is closed or archived and is no longer accepting comments/proposals.',
+        'DELETED': 'The platform listing has been deleted or removed by its author or moderation.',
+        'PRIVATE': 'The opportunity is private or restricted, requiring login credentials or specific author permissions.',
+        'NO_PERMISSIONS': 'Access unauthorized due to account limitations or membership level restrictions.',
+        'ACCOUNT_SUSPENDED': 'The listing owner account is suspended, blocked or deactivated.',
+        'INSUFFICIENT_CONTENT': 'The project title is too short (less than 5 chars) or description detail is too sparse (less than 20 chars).',
+        'UNRELATED_CONTENT': 'The page was redirected to an unrelated section (e.g., dashboard lists, homepages, or a mismatching project ID).',
+        'TIMEOUT': 'Navigation timed out because the page failed to render or load assets within 40 seconds.',
+        'RATE_LIMIT': 'The platform returned a rate limit response or triggered anti-scraping cloudflare shields.',
+        'UNAVAILABLE': 'The resource became temporarily unreachable or returned abnormal/blank content responses.'
+      };
+
+      const detailedReason = detailedReasonsMap[failReason] || 'The listing does not meet safety, health or platform eligibility requirements.';
+      const targetUrl = job.link || 'No URL available';
+
+      db.addLog('warning', 'scraper', `[PRE-SAVE REJECT & SKIP] Skipped saving invalid, ended or incorrect opportunity: "${job.title}"\n- Reason: ${failReason} (${detailedReason})\n- URL: ${targetUrl}`);
       
       // Space out consecutive browser visits slightly to keep profiles healthy
       await new Promise(resolve => setTimeout(resolve, 1000));
@@ -449,50 +314,54 @@ export async function triggerActivePlatformsScrape(): Promise<number> {
         await new Promise(resolve => setTimeout(resolve, 1500));
       }
       addedCount++;
-      // Analyze with Gemini
-      const analysis = await analyzeOpportunity(profile, added);
-      db.updateOpportunity(added.id, { matchAnalysis: analysis });
+      try {
+        // Analyze with Gemini
+        const analysis = await analyzeOpportunity(profile, added);
+        db.updateOpportunity(added.id, { matchAnalysis: analysis });
 
-      // If in full-auto mode and match score meets or exceeds standard threshold, approve it to proposals queue
-      if (settings.mode === 'auto' && analysis.score >= settings.autoApproveMinScore) {
-        db.updateOpportunity(added.id, { status: 'approved' });
-        db.addLog('success', 'automation', `[AUTO] Pre-approved job "${added.title}" to proposals queue - Match score ${analysis.score}% meets threshold (${settings.autoApproveMinScore}%). Generating proposal...`);
-        
-        try {
-          const pitchContent = await writeProposal(profile, added, profile.proposalTone || 'professional', profile.proposalTone ? 'medium' : 'medium');
-          const propId = `prop-auto-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-          const newProp = {
-            id: propId,
-            opportunityId: added.id,
-            content: pitchContent,
-            tone: profile.proposalTone || 'professional',
-            length: profile.proposalLength || 'medium',
-            status: 'draft' as const,
-            timestamp: new Date().toISOString()
-          };
-          db.addProposal(newProp);
-          db.updateOpportunity(added.id, { proposalId: propId });
+        // If in full-auto mode and match score meets or exceeds standard threshold, approve it to proposals queue
+        if (settings.mode === 'auto' && analysis.score >= settings.autoApproveMinScore) {
+          db.updateOpportunity(added.id, { status: 'approved' });
+          db.addLog('success', 'automation', `[AUTO] Pre-approved job "${added.title}" to proposals queue - Match score ${analysis.score}% meets threshold (${settings.autoApproveMinScore}%). Generating proposal...`);
           
-          db.addLog('info', 'automation', `[AUTO-SUBMIT] Automatically bidding on "${added.title}" (Match score ${analysis.score}%)...`);
-          const submissionResult = await submitProposalViaPlaywright(propId);
-          if (submissionResult.success) {
-            db.updateProposal(propId, {
-              status: 'submitted',
-              submittedPlatformLink: submissionResult.submittedLink
-            });
-            db.updateOpportunity(added.id, { status: 'submitted' });
-            db.addLog('success', 'automation', `[AUTO-SUBMIT SUCCESS] Bidded on "${added.title}" successfully! Link: ${submissionResult.submittedLink}`);
-          } else {
-            db.addLog('warning', 'automation', `[AUTO-SUBMIT DEFER] Playwright automated bidding failed on "${added.title}": ${submissionResult.message}`);
+          try {
+            const pitchContent = await writeProposal(profile, added, profile.proposalTone || 'professional', profile.proposalTone ? 'medium' : 'medium');
+            const propId = `prop-auto-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+            const newProp = {
+              id: propId,
+              opportunityId: added.id,
+              content: pitchContent,
+              tone: profile.proposalTone || 'professional',
+              length: profile.proposalLength || 'medium',
+              status: 'draft' as const,
+              timestamp: new Date().toISOString()
+            };
+            db.addProposal(newProp);
+            db.updateOpportunity(added.id, { proposalId: propId });
+            
+            db.addLog('info', 'automation', `[AUTO-SUBMIT] Automatically bidding on "${added.title}" (Match score ${analysis.score}%)...`);
+            const submissionResult = await submitProposalViaPlaywright(propId);
+            if (submissionResult.success) {
+              db.updateProposal(propId, {
+                status: 'submitted',
+                submittedPlatformLink: submissionResult.submittedLink
+              });
+              db.updateOpportunity(added.id, { status: 'submitted' });
+              db.addLog('success', 'automation', `[AUTO-SUBMIT SUCCESS] Bidded on "${added.title}" successfully! Link: ${submissionResult.submittedLink}`);
+            } else {
+              db.addLog('warning', 'automation', `[AUTO-SUBMIT DEFER] Playwright automated bidding failed on "${added.title}": ${submissionResult.message}`);
+            }
+          } catch (autoErr: any) {
+            db.addLog('error', 'automation', `[AUTO-SUBMIT ERROR] Failed inside auto-proposal generator or poster: ${autoErr.message}`);
           }
-        } catch (autoErr: any) {
-          db.addLog('error', 'automation', `[AUTO-SUBMIT ERROR] Failed inside auto-proposal generator or poster: ${autoErr.message}`);
+        } else if (analysis.score >= 70) {
+          // Log match
+          db.addLog('success', 'gemini', `Found strong match (${analysis.score}%): "${added.title}" on ${added.platform}!`);
+          // Send alert via Telegram message
+          await sendJobMatchAlert(added, analysis.score);
         }
-      } else if (analysis.score >= 70) {
-        // Log match
-        db.addLog('success', 'gemini', `Found strong match (${analysis.score}%): "${added.title}" on ${added.platform}!`);
-        // Send alert via Telegram message
-        await sendJobMatchAlert(added, analysis.score);
+      } catch (analyzeErr: any) {
+        db.addLog('warning', 'gemini', `Could not automatically analyze real job "${added.title}": ${analyzeErr.message}`);
       }
     }
   }
@@ -556,7 +425,8 @@ export async function revalidateSavedOpportunities(force: boolean = false): Prom
         finalUrl: details.finalUrl || op.finalUrl,
         pageType: details.pageType || op.pageType,
         platformId: details.platformId || op.platformId,
-        canApply: details.canApply !== undefined ? details.canApply : true,
+        canApply: true,
+        bidLimitReached: details.bidLimitReached || false,
         redirectDetected: details.redirectDetected || false,
         redirectChain: details.redirectChain || [],
         healthScore: details.healthScore !== undefined ? details.healthScore : 100,

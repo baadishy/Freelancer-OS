@@ -7,7 +7,7 @@ This document serves as an exhaustive, top-to-bottom master guide detailing how 
 ---
 
 ## 1. High-Level System Overview
-**Freelance OS** is a full-stack, AI-powered freelance assistant designed to automatedly discover opportunities on major freelancing portals (predominantly Arabic-speaking platforms such as **Khamsat** and **Mostaql**, alongside international platforms like **Fiverr**), analyze listings for skill/profile alignment, write tailored pitches using the official **Gemini API** (`@google/genai`), and auto-submit bids using robust **Playwright browser sessions**, all while delivering real-time logs and periodic reports directly to a specified **Telegram Channel/Bot**.
+**Freelance OS** is a full-stack, AI-powered freelance assistant designed to automatedly discover opportunities on major freelancing portals (predominantly Arabic-speaking platforms such as **Khamsat** and **Mostaql**), analyze listings for skill/profile alignment, write tailored pitches using the official **Gemini API** (`@google/genai`), and auto-submit bids using robust **Playwright browser sessions**, all while delivering real-time logs and periodic reports directly to a specified **Telegram Channel/Bot**.
 
 ---
 
@@ -71,7 +71,7 @@ Designed with high-contrast displays, responsive layouts, and a cohesive palette
 
 ## 5. Playwright Browser Automation Mechanics (`/server/playwright-session.ts`)
 
-Playwright serves as the programmatic "browser driver" that replicates realistic human behaviors on Fiverr, Khamsat, and Mostaql.
+Playwright serves as the programmatic "browser driver" that replicates realistic human behaviors on Khamsat and Mostaql.
 
 ### browser Auto-Detection
 The framework automatically detects local Google Chrome, Chromium, or Microsoft Edge binaries using platform-aware system sweeps:

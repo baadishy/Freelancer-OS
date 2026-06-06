@@ -226,9 +226,11 @@ export default function OpportunitiesView({
       if (response.ok) {
         onShowToast(`Project status registered: ${status}`, 'success');
         setJobs(prev => prev.map(j => j.id === id ? data : j));
+      } else {
+        throw new Error(data.error || 'Response not ok');
       }
-    } catch (e) {
-      onShowToast('Could not save project status.', 'error');
+    } catch (e: any) {
+      onShowToast(e instanceof Error && e.message !== 'Response not ok' ? e.message : 'Could not save project status.', 'error');
     }
   };
 
@@ -367,8 +369,7 @@ export default function OpportunitiesView({
                 value={platform}
                 onChange={(e) => setPlatform(e.target.value)}
               >
-                <option value="all">Fiverr + Mostaql + Khamsat</option>
-                <option value="Fiverr">Fiverr Only</option>
+                <option value="all">Mostaql + Khamsat</option>
                 <option value="Mostaql">Mostaql Only</option>
                 <option value="Khamsat">Khamsat Only</option>
               </select>
@@ -476,17 +477,13 @@ export default function OpportunitiesView({
                   <div className="flex flex-wrap items-center gap-2">
                     <span className={`inline-flex items-center gap-1.5 text-[10px] pl-1.5 pr-2.5 py-0.5 rounded font-extrabold uppercase tracking-wider border ${
                       job.platform === 'Mostaql' ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20' :
-                      job.platform === 'Khamsat' ? 'bg-orange-500/10 text-orange-400 border border-orange-500/20' :
-                      'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                      'bg-orange-500/10 text-orange-400 border border-orange-500/20'
                     }`}>
                       {job.platform === 'Mostaql' && (
                         <span className="w-3.5 h-3.5 rounded-full bg-blue-500 flex items-center justify-center text-[8px] font-extrabold text-white select-none">M</span>
                       )}
                       {job.platform === 'Khamsat' && (
                         <span className="w-3.5 h-3.5 rounded-full bg-orange-500 flex items-center justify-center text-[8px] font-extrabold text-white select-none">٥</span>
-                      )}
-                      {job.platform === 'Fiverr' && (
-                        <span className="w-3.5 h-3.5 rounded-full bg-emerald-550 flex items-center justify-center text-[8px] font-extrabold text-white select-none">f</span>
                       )}
                       {job.platform}
                     </span>                     <span className="text-[10px] px-2 py-0.5 rounded bg-[#07080d] border border-[#1e2235] text-slate-400 uppercase tracking-widest font-semibold font-mono">

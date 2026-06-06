@@ -16,8 +16,8 @@ import { analyzeOpportunity, writeProposal, analyzeJobAndGenerateProposal } from
 import { startScheduler, sendTelegramMessage, sendDailyBriefingReport, escapeMarkdown } from './server/telegram.ts';
 import { triggerActivePlatformsScrape, startScraperScheduler, revalidateSavedOpportunities } from './server/scraper.ts';
 import { getScraperAnalytics, saveScraperAnalytics } from './server/scraper-analytics.ts';
-import { playwrightSession, validatePlatformSession, submitProposalViaPlaywright, detectChromePath, importCookiesToPlatform, validateOpportunity, extractMostaqlOpportunity, extractKhamsatOpportunity, extractFiverrOpportunity, launchPlaywrightPersistent, extractKhamsatId } from './server/playwright-session.ts';
-import { validateSemanticConsistency, extractBoardTitleFromKhamsatUrl } from './server/url-resolver.ts';
+import { playwrightSession, validatePlatformSession, submitProposalViaPlaywright, detectChromePath, importCookiesToPlatform, validateOpportunity, extractMostaqlOpportunity, extractKhamsatOpportunity, launchPlaywrightPersistent, extractKhamsatId } from './server/playwright-session.ts';
+import { validateSemanticConsistency, extractBoardTitleFromKhamsatUrl, calculateOpportunityHealth } from './server/url-resolver.ts';
 import { Opportunity, Proposal } from './src/types.ts';
 import { Type } from "@google/genai";
 
@@ -355,8 +355,8 @@ async function startServer() {
 
   app.post('/api/accounts/connect', async (req, res) => {
     const { platform } = req.body;
-    if (!platform || !['Khamsat', 'Mostaql', 'Fiverr'].includes(platform)) {
-      return res.status(400).json({ error: 'Valid platform (Khamsat, Mostaql, Fiverr) is required.' });
+    if (!platform || !['Khamsat', 'Mostaql'].includes(platform)) {
+      return res.status(400).json({ error: 'Valid platform (Khamsat, Mostaql) is required.' });
     }
     try {
       const screenshot = await playwrightSession.startSession(platform);
@@ -418,7 +418,7 @@ async function startServer() {
 
   app.post('/api/accounts/disconnect', async (req, res) => {
     const { platform } = req.body;
-    if (!platform || !['Khamsat', 'Mostaql', 'Fiverr'].includes(platform)) {
+    if (!platform || !['Khamsat', 'Mostaql'].includes(platform)) {
       return res.status(400).json({ error: 'Valid platform is required.' });
     }
     try {
@@ -456,7 +456,7 @@ async function startServer() {
 
   app.post('/api/accounts/validate', async (req, res) => {
     const { platform } = req.body;
-    if (!platform || !['Khamsat', 'Mostaql', 'Fiverr'].includes(platform)) {
+    if (!platform || !['Khamsat', 'Mostaql'].includes(platform)) {
       return res.status(400).json({ error: 'Valid platform is required.' });
     }
     try {
@@ -469,8 +469,8 @@ async function startServer() {
 
   app.post('/api/accounts/import-cookies', async (req, res) => {
     const { platform, cookies } = req.body;
-    if (!platform || !['Khamsat', 'Mostaql', 'Fiverr'].includes(platform)) {
-      return res.status(400).json({ error: 'Valid platform (Khamsat, Mostaql, Fiverr) is required.' });
+    if (!platform || !['Khamsat', 'Mostaql'].includes(platform)) {
+      return res.status(400).json({ error: 'Valid platform (Khamsat, Mostaql) is required.' });
     }
     if (!cookies) {
       return res.status(400).json({ error: 'Cookies data is required.' });
@@ -542,7 +542,7 @@ async function startServer() {
       }
 
       // Min Score filter
-      if (minScore) {
+      if (minScore && minScore !== '0') {
         const threshold = parseInt(minScore as string);
         ops = ops.filter(o => o.matchAnalysis && o.matchAnalysis.score >= threshold);
       }
@@ -596,7 +596,7 @@ async function startServer() {
         if (parsedTech || budgetFilter || lowComplexityOnly) {
           ops = ops.filter(o => {
             let matched = true;
-            if (parsedTech && !o.title.toLowerCase().includes(parsedTech) && !o.description.toLowerCase().includes(parsedTech)) {
+            if (parsedTech && !(o.title || '').toLowerCase().includes(parsedTech) && !(o.description || '').toLowerCase().includes(parsedTech)) {
               matched = false;
             }
             if (budgetFilter && !budgetFilter(o.budget)) {
@@ -610,10 +610,10 @@ async function startServer() {
         } else {
           // Standard text searching
           ops = ops.filter(o => 
-            o.title.toLowerCase().includes(query) || 
-            o.description.toLowerCase().includes(query) ||
-            o.clientName.toLowerCase().includes(query) ||
-            o.category.toLowerCase().includes(query)
+            (o.title || '').toLowerCase().includes(query) || 
+            (o.description || '').toLowerCase().includes(query) ||
+            (o.clientName || '').toLowerCase().includes(query) ||
+            (o.category || '').toLowerCase().includes(query)
           );
         }
       }
@@ -647,8 +647,7 @@ async function startServer() {
       const defaultAnalytics = {
         platformStats: {
           Khamsat: { platform: 'Khamsat', candidatesDiscovered: 0, validationPassed: 0, validationFailed: 0, redirected: 0, closed: 0, deleted: 0, private: 0, contentMismatch: 0, cannotApply: 0, softInvalid: 0, realCount: 0, simulatedCount: 0, highMatchCount: 0, proposalCapableCount: 0 },
-          Mostaql: { platform: 'Mostaql', candidatesDiscovered: 0, validationPassed: 0, validationFailed: 0, redirected: 0, closed: 0, deleted: 0, private: 0, contentMismatch: 0, cannotApply: 0, softInvalid: 0, realCount: 0, simulatedCount: 0, highMatchCount: 0, proposalCapableCount: 0 },
-          Fiverr: { platform: 'Fiverr', candidatesDiscovered: 0, validationPassed: 0, validationFailed: 0, redirected: 0, closed: 0, deleted: 0, private: 0, contentMismatch: 0, cannotApply: 0, softInvalid: 0, realCount: 0, simulatedCount: 0, highMatchCount: 0, proposalCapableCount: 0 }
+          Mostaql: { platform: 'Mostaql', candidatesDiscovered: 0, validationPassed: 0, validationFailed: 0, redirected: 0, closed: 0, deleted: 0, private: 0, contentMismatch: 0, cannotApply: 0, softInvalid: 0, realCount: 0, simulatedCount: 0, highMatchCount: 0, proposalCapableCount: 0 }
         },
         topSkills: {},
         acquisitionScore: 0
@@ -742,7 +741,7 @@ async function startServer() {
     // Bypass mock/simulated links right away!
     const lowerUrl = url.toLowerCase();
     if (lowerUrl.includes('-job-') || lowerUrl.includes('/requests/999999') || lowerUrl.includes('local') || lowerUrl.includes('simulate') || lowerUrl.includes('mock')) {
-      const platformName = lowerUrl.includes('mostaql') ? 'Mostaql' as const : lowerUrl.includes('khamsat') ? 'Khamsat' as const : 'Fiverr' as const;
+      const platformName = lowerUrl.includes('mostaql') ? 'Mostaql' as const : 'Khamsat' as const;
       const steps = [
         { name: 'Detect Platform Domain', status: 'success' as const, message: `Successfully resolved target platform: Simulated ${platformName}` },
         { name: 'URL Routing Pattern Check', status: 'success' as const, message: 'Passed pattern verification: Simulated fallback trace.' },
@@ -759,7 +758,7 @@ async function startServer() {
           link: url,
           budget: "$150 - $300",
           clientName: "Public Partner",
-          category: platformName === 'Mostaql' ? 'برمجة وتطوير المواقع' : platformName === 'Khamsat' ? 'تطوير مواقع وتطبيقات' : 'Web Development',
+          category: platformName === 'Mostaql' ? 'برمجة وتطوير المواقع' : 'تطوير مواقع وتطبيقات',
           description: "This is an active simulated public opportunity. Interactive routing bypassed.",
           language: "en",
           validationStatus: "VALID"
@@ -786,17 +785,15 @@ async function startServer() {
     setStep('Telegram Safe-Format Formatting Check', 'pending', 'Awaiting previous step Completion');
 
     // Step 1: Detect Platform by parsing URL Domain
-    let platform: 'Khamsat' | 'Mostaql' | 'Fiverr' | null = null;
+    let platform: 'Khamsat' | 'Mostaql' | null = null;
     if (lowerUrl.includes('khamsat.com')) {
       platform = 'Khamsat';
     } else if (lowerUrl.includes('mostaql.com')) {
       platform = 'Mostaql';
-    } else if (lowerUrl.includes('fiverr.com')) {
-      platform = 'Fiverr';
     }
 
     if (!platform) {
-      setStep('Detect Platform Domain', 'failed', `Unrecognized platform. The URL must belong to khamsat.com, mostaql.com, or fiverr.com as supported freelance hubs. Supplied: "${url}"`);
+      setStep('Detect Platform Domain', 'failed', `Unrecognized platform. The URL must belong to khamsat.com or mostaql.com as supported freelance hubs. Supplied: "${url}"`);
       return res.json({ success: false, steps });
     }
 
@@ -820,22 +817,6 @@ async function startServer() {
         pathMessage = 'Invalid path pattern. Khamsat community requests must match "/community/requests/ID" or direct service page "/service/ID".';
       } else {
         pathMessage = `Passed pattern verification: URL represents a direct Khamsat ${isRequest ? 'community request brief' : 'service'} page.`;
-      }
-    } else if (platform === 'Fiverr') {
-      if (
-        lowerUrl.includes('/search/') ||
-        lowerUrl.includes('/categories/') ||
-        lowerUrl.includes('/support') ||
-        lowerUrl.includes('/users/') || 
-        lowerUrl.includes('/profile/') ||
-        lowerUrl.includes('preview=true') ||
-        lowerUrl.includes('/inbox') ||
-        lowerUrl.includes('/conversations')
-      ) {
-        pathValid = false;
-        pathMessage = 'Protected path block. Fiverr URL points to meta lists, query paths, user portfolios, or messages, which are inaccessible to the scraper.';
-      } else {
-        pathMessage = 'Passed pattern verification: URL represents a valid Fiverr gig or custom project description page.';
       }
     }
 
@@ -900,16 +881,6 @@ async function startServer() {
             db.addLog('info', 'scraper', `[DEBUGGER] User session is authenticated, but access to this specific Khamsat URL is restricted/private.`);
           }
         }
-      } else if (platform === 'Fiverr') {
-        if (lowerFinal.endsWith('fiverr.com/') || lowerFinal.includes('/login') || lowerFinal.includes('/join') || lowerFinal.includes('/categories')) {
-          const userMenu = await page.$('.logged-in, .user-avatar, a[href*="/logout"], img[src*="user_image"]');
-          if (!userMenu) {
-            loginRedirect = true;
-            loginMsg = 'Fiverr redirected to authentication and no active session was located. Your account context might be expired. Refresh his fiverr session info.';
-          } else {
-            db.addLog('info', 'scraper', `[DEBUGGER] Fiverr session is active, but this URL structure is metadata-restricted.`);
-          }
-        }
       }
 
       if (loginRedirect) {
@@ -928,11 +899,6 @@ async function startServer() {
         const m1 = url.match(/\/project\/(\d+)/i);
         originalId = m1 ? m1[1] : null;
         const m2 = finalUrl.match(/\/project\/(\d+)/i);
-        finalId = m2 ? m2[1] : null;
-      } else if (platform === 'Fiverr') {
-        const m1 = url.match(/brief_id=([a-f0-9-]+)/i) || url.match(/\/shares\/(\d+)/i);
-        originalId = m1 ? m1[1] : null;
-        const m2 = finalUrl.match(/brief_id=([a-f0-9-]+)/i) || finalUrl.match(/\/shares\/(\d+)/i);
         finalId = m2 ? m2[1] : null;
       }
 
@@ -1017,11 +983,6 @@ async function startServer() {
           markerMatch = true;
           markerText = 'Topic is closed to new replies ("الموضوع مغلق").';
         }
-      } else if (platform === 'Fiverr') {
-        if (mainText.includes("This gig isn't available now") || mainText.includes("isn't available now") || mainText.includes("The page you are looking for can't be found")) {
-          markerMatch = true;
-          markerText = "Gig or custom request is inactive or paused on Fiverr.";
-        }
       }
 
       if (markerMatch) {
@@ -1032,10 +993,8 @@ async function startServer() {
 
       if (platform === 'Mostaql') {
         extractionRes = await extractMostaqlOpportunity(page, finalUrl);
-      } else if (platform === 'Khamsat') {
-        extractionRes = await extractKhamsatOpportunity(page, finalUrl);
       } else {
-        extractionRes = await extractFiverrOpportunity(page, finalUrl);
+        extractionRes = await extractKhamsatOpportunity(page, finalUrl);
       }
 
       if (!extractionRes || !extractionRes.valid) {
@@ -1118,38 +1077,69 @@ async function startServer() {
       const existingOp = db.getOpportunities().find(o => o.link === url || o.originalUrl === url || o.finalUrl === url);
       const bTitle = existingOp?.boardTitle || extractBoardTitleFromKhamsatUrl(url);
 
+      const computedHealthScore = calculateOpportunityHealth({
+        validationStatus: 'VALID',
+        pageType: extractionRes.pageType || 'REQUEST',
+        title: extractionRes.title,
+        description: extractionRes.description,
+        clientName: extractionRes.clientName,
+        redirectDetected: url !== finalUrl
+      });
+
+      const freshOp: Opportunity = {
+        id: existingOp?.id || `${platform === 'Mostaql' ? 'mos' : 'kh'}-debug-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+        title: extractionRes.title,
+        platform,
+        link: finalUrl,
+        budget: extractionRes.budget,
+        clientName: extractionRes.clientName,
+        category: extractionRes.category,
+        description: extractionRes.description,
+        language: extractionRes.language,
+        period: extractionRes.period,
+        cost: extractionRes.budget ? (extractionRes.budget.match(/\d+/) ? parseInt(extractionRes.budget.match(/\d+/)![0], 10) : undefined) : undefined,
+        status: existingOp?.status || 'new',
+        validationStatus: 'VALID',
+        validationReason: null,
+        originalUrl: url,
+        finalUrl: finalUrl,
+        serviceId: extractKhamsatId(url) || '',
+        finalServiceId: extractKhamsatId(finalUrl) || '',
+        redirectDetected: url !== finalUrl,
+        publishedAt: extractionRes.publishedAt || 'Just now',
+        lastValidatedAt: new Date().toISOString(),
+        boardTitle: bTitle || extractionRes.title,
+        boardSnippet: existingOp?.boardSnippet || extractionRes.description.substring(0, 300),
+        boardCategory: existingOp?.boardCategory || extractionRes.category,
+        liveTitle: extractionRes.title,
+        liveCategory: extractionRes.category,
+        titleSimilarity: existingOp?.titleSimilarity || 100,
+        descriptionSimilarity: existingOp?.descriptionSimilarity || 100,
+        semanticValidation: true,
+        healthScore: computedHealthScore,
+        isActive: true,
+        timestamp: new Date().toISOString()
+      };
+
+      // Add to database so it persists and becomes visible in dashboard!
+      const addedOp = db.addOpportunity(freshOp);
+      
+      // Also trigger AI Match Analysis for this newly added/debugged opportunity!
+      const profile = db.getProfile();
+      try {
+        db.addLog('info', 'gemini', `Automatically generating match analysis for manually verified opportunity: "${addedOp.title}"...`);
+        const analysis = await analyzeOpportunity(profile, addedOp);
+        db.updateOpportunity(addedOp.id, { matchAnalysis: analysis });
+        // Retrieve updated opportunity
+        freshOp.matchAnalysis = analysis;
+      } catch (analyzeErr: any) {
+        db.addLog('warning', 'gemini', `Could not automatically calculate AI score for manually verified opportunity: ${analyzeErr.message}`);
+      }
+
       res.json({
         success: true,
         steps,
-        opportunity: {
-          title: extractionRes.title,
-          platform,
-          link: finalUrl,
-          budget: extractionRes.budget,
-          clientName: extractionRes.clientName,
-          category: extractionRes.category,
-          description: extractionRes.description,
-          language: extractionRes.language,
-          period: extractionRes.period,
-          cost: extractionRes.budget ? (extractionRes.budget.match(/\d+/) ? parseInt(extractionRes.budget.match(/\d+/)![0], 10) : undefined) : undefined,
-          validationStatus: 'VALID',
-          validationReason: null,
-          originalUrl: url,
-          finalUrl: finalUrl,
-          serviceId: extractKhamsatId(url) || '',
-          finalServiceId: extractKhamsatId(finalUrl) || '',
-          redirectDetected: url !== finalUrl,
-          publishedAt: extractionRes.publishedAt,
-          lastValidatedAt: new Date().toISOString(),
-          boardTitle: bTitle || undefined,
-          boardSnippet: existingOp?.boardSnippet || undefined,
-          boardCategory: existingOp?.boardCategory || undefined,
-          liveTitle: extractionRes.title,
-          liveCategory: extractionRes.category,
-          titleSimilarity: existingOp?.titleSimilarity || 100,
-          descriptionSimilarity: existingOp?.descriptionSimilarity || 100,
-          semanticValidation: true
-        }
+        opportunity: freshOp
       });
     } catch (err: any) {
       setStep('Telegram Safe-Format Formatting Check', 'failed', `Formatting validator failed: ${err.message}`);
@@ -1416,10 +1406,10 @@ async function startServer() {
       const replies = Math.round(submitted * 0.4); // 40% response rate simulation
       const acceptanceRate = submitted > 0 ? Math.round((replies * 0.5) / submitted * 100) : 0;
 
-      const platformsBreakdown = { Khamsat: 0, Mostaql: 0, Fiverr: 0 };
+      const platformsBreakdown = { Khamsat: 0, Mostaql: 0 };
       ops.forEach(o => {
         if (o.platform in platformsBreakdown) {
-          platformsBreakdown[o.platform as 'Khamsat' | 'Mostaql' | 'Fiverr']++;
+          platformsBreakdown[o.platform as 'Khamsat' | 'Mostaql']++;
         }
       });
 
@@ -1556,7 +1546,7 @@ async function startServer() {
 
         2. ACCESSED LEADS & OPPORTUNITIES:
         - Total discovered jobs in database: ${opportunities.length}
-        - Jobs breakdown: Khamsat: ${opportunities.filter(o => o.platform === 'Khamsat').length}, Mostaql: ${opportunities.filter(o => o.platform === 'Mostaql').length}, Fiverr: ${opportunities.filter(o => o.platform === 'Fiverr').length}
+        - Jobs breakdown: Khamsat: ${opportunities.filter(o => o.platform === 'Khamsat').length}, Mostaql: ${opportunities.filter(o => o.platform === 'Mostaql').length}
         - Key matching jobs (top highest scores):
           ${opportunities
             .filter(o => o.matchAnalysis)
@@ -1581,7 +1571,7 @@ async function startServer() {
         - Orchestration Rules (Settings): Toggle Telegram bots, change scraper times, configure auto-approvals, choose which Gemini model you use (model dropdown available in rules!).
 
         CHANNELS & HOW TO REDIRECT/FIX ISSUES:
-        - If the user complains about "not found link" / "404 projects pages": Reassure them that you have fully fixed the link redirection. Now, when clicking the links on newly-created or pre-existing opportunities, they are dynamically redirected via safe on-the-fly sanitize logic to stable pages e.g. Khamsat community requests, Mostaql projects list, or Fiverr search query feeds, meaning they will NEVER land on a 404 page again!
+        - If the user complains about "not found link" / "404 projects pages": Reassure them that you have fully fixed the link redirection. Now, when clicking the links on newly-created or pre-existing opportunities, they are dynamically redirected via safe on-the-fly sanitize logic to stable pages e.g. Khamsat community requests or Mostaql projects list, meaning they will NEVER land on a 404 page again!
         - If the user asks "what should I do?": Look at their profile and the high matching opportunities! Give actual recommendations based on real items in the list (e.g., "Look at the Mostaql project for React, which has a 92% match! Go to the Opportunities tab, approve it, and generate a proposal."). Keep answers strategic, encouraging, and extremely practical.
       `;
 
@@ -1703,7 +1693,7 @@ async function startServer() {
             },
             {
               name: "trigger_scraping_now",
-              description: "Triggers and runs an immediate scrap crawl of job opportunities on all active freelancing platforms (Khamsat, Mostaql, Fiverr).",
+              description: "Triggers and runs an immediate scrap crawl of job opportunities on all active freelancing platforms (Khamsat, Mostaql).",
               parameters: {
                 type: Type.OBJECT,
                 properties: {}
@@ -1803,7 +1793,7 @@ async function startServer() {
           }
           else if (name === 'trigger_scraping_now') {
             triggerActivePlatformsScrape().catch(err => console.error('Bg scrap err:', err));
-            toolMessage += `Triggered immediate platform scraping sequence run on Khamsat, Mostaql, and Fiverr.\n`;
+            toolMessage += `Triggered immediate platform scraping sequence run on Khamsat and Mostaql.\n`;
           }
           else if (name === 'send_daily_telegram_briefing') {
             sendDailyBriefingReport().catch(err => console.error('Brief error:', err));

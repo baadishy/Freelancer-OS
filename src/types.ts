@@ -14,7 +14,6 @@ export interface PortfolioProject {
 export interface PlatformCookies {
   khamsat?: string;
   mostaql?: string;
-  fiverr?: string;
 }
 
 export interface FreelancerProfile {
@@ -57,7 +56,7 @@ export interface MatchAnalysis {
 export interface Opportunity {
   id: string;
   title: string;
-  platform: 'Khamsat' | 'Mostaql' | 'Fiverr';
+  platform: 'Khamsat' | 'Mostaql';
   link: string;
   budget: string;
   clientName: string;
@@ -100,6 +99,7 @@ export interface Opportunity {
   semanticValidationReason?: string;
   period?: number;
   cost?: number;
+  bidLimitReached?: boolean;
 }
 
 export interface Proposal {
@@ -159,14 +159,13 @@ export interface DashboardStats {
   platformsBreakdown: {
     Khamsat: number;
     Mostaql: number;
-    Fiverr: number;
   };
 }
 
 export type ConnectedAccountStatus = 'CONNECTED' | 'DISCONNECTED' | 'EXPIRED' | 'LOGIN_REQUIRED' | 'ERROR';
 
 export interface ConnectedAccount {
-  platform: 'Khamsat' | 'Mostaql' | 'Fiverr';
+  platform: 'Khamsat' | 'Mostaql';
   status: ConnectedAccountStatus;
   username?: string;
   lastLogin?: string;
@@ -177,7 +176,7 @@ export interface ConnectedAccount {
 }
 
 export interface PlatformScraperStats {
-  platform: 'Khamsat' | 'Mostaql' | 'Fiverr';
+  platform: 'Khamsat' | 'Mostaql';
   candidatesDiscovered: number;
   validationPassed: number;
   validationFailed: number;
@@ -195,7 +194,7 @@ export interface PlatformScraperStats {
 }
 
 export interface ScraperAnalytics {
-  platformStats: Record<'Khamsat' | 'Mostaql' | 'Fiverr', PlatformScraperStats>;
+  platformStats: Record<'Khamsat' | 'Mostaql', PlatformScraperStats>;
   topSkills: Record<string, number>;
   acquisitionScore: number;
 }

@@ -220,7 +220,6 @@ Below is the list of available commands. Note that any querying or platform scra
 💵 <b>Platform Queue Queries (ZERO AI Cost):</b>
 • <code>/khamsat</code> — Lists the latest 6 freelance projects scraped from Khamsat, including descriptions, budgets, and links. (Uses Database directly)
 • <code>/mostaql</code> — Lists the latest 6 active opportunities from Mostaql with project details, matching metrics, and statuses. (Uses Database directly)
-• <code>/fiverr</code> — Shows Fiverr platform opportunities and matched gig briefs. (Uses Database directly)
 • <code>/profile</code> — Displays your configured freelancer persona, stack, target rates, and exclusions. (Uses Database directly)
 • <code>/match</code> — Lists highly compatible projects that match your profile score. (Uses Database directly)
 • <code>/status</code> — Confirms continuous backend container health, scraper logs, account connections, and daily metrics. (Uses Database directly)
@@ -281,26 +280,7 @@ Below is the list of available commands. Note that any querying or platform scra
       return;
     }
 
-    if (command === '/fiverr') {
-      const ops = db.getOpportunities().filter(o => o.platform.toLowerCase() === 'fiverr');
-      if (ops.length === 0) {
-        await sendReply(chatId, `📋 <b>Fiverr Gigs Queue</b>\n\nNo Fiverr gigs are logged in your database yet.\nUse <code>/scrape</code> to locate services!`, 'HTML');
-        return;
-      }
-      const responseLines = [
-        `📋 <b>Fiverr Gigs Queue (Latest ${Math.min(ops.length, 6)})</b>`,
-        `----------------------------------------`
-      ];
-      ops.slice(0, 6).forEach((o, i) => {
-        const scoreText = o.matchAnalysis ? `⭐ <b>${o.matchAnalysis.score}%</b>` : `<i>Unscored</i>`;
-        const healthText = o.validationStatus === 'VALID' ? `✅ Healthy` : `⚠️ ${escapeHtml(o.validationReason || 'Expired')}`;
-        responseLines.push(
-          `<b>${i + 1}.</b> <a href="${o.link}"><b>${escapeHtml(o.title)}</b></a>\nPrice: <b>${escapeHtml(o.budget)}</b> | Match: ${scoreText}\nStatus: <b>${o.status}</b> | Health: <i>${healthText}</i>`
-        );
-      });
-      await sendReply(chatId, responseLines.join('\n\n'), 'HTML');
-      return;
-    }
+
 
     if (command === '/profile') {
       const profile = db.getProfile();
@@ -392,7 +372,7 @@ ${logsLines || '<i>No recent logs recorded.</i>'}
     }
 
     if (command === '/scrape') {
-      await sendReply(chatId, `🔄 <b>Crawling Active Platforms...</b>\n\nYour background crawler engines are logging into Khamsat, Mostaql, and Fiverr and scanning search channels. This might take 15 to 40 seconds. Please hold...`, 'HTML');
+      await sendReply(chatId, `🔄 <b>Crawling Active Platforms...</b>\n\nYour background crawler engines are logging into Khamsat and Mostaql and scanning search channels. This might take 15 to 40 seconds. Please hold...`, 'HTML');
 
       try {
         const { triggerActivePlatformsScrape } = await import('./scraper.js');

@@ -76,7 +76,7 @@ export default function DashboardView({ onNavigate, onShowToast }: DashboardView
 
   const triggerManualScrape = async () => {
     setRefreshing(true);
-    onShowToast('Scraping Mostaql, Fiverr, and Khamsat platforms...', 'info');
+    onShowToast('Scraping Mostaql and Khamsat platforms...', 'info');
     try {
       const response = await fetch('/api/opportunities/scrape', { method: 'POST' });
       const data = await response.json();
@@ -141,10 +141,9 @@ export default function DashboardView({ onNavigate, onShowToast }: DashboardView
   }
 
   // Pure SVG Circular Donut calculations for dashboard platforms ratio
-  const totalPr = stats.platformsBreakdown.Khamsat + stats.platformsBreakdown.Mostaql + stats.platformsBreakdown.Fiverr || 1;
+  const totalPr = stats.platformsBreakdown.Khamsat + stats.platformsBreakdown.Mostaql || 1;
   const khPct = stats.platformsBreakdown.Khamsat / totalPr;
   const mosPct = stats.platformsBreakdown.Mostaql / totalPr;
-  const fivPct = stats.platformsBreakdown.Fiverr / totalPr;
 
   return (
     <div className="space-y-8 font-sans">
@@ -300,17 +299,13 @@ export default function DashboardView({ onNavigate, onShowToast }: DashboardView
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className={`inline-flex items-center gap-1.25 text-[10px] pl-1.25 pr-2 py-0.5 rounded font-bold uppercase tracking-widest border ${
                           job.platform === 'Mostaql' ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20' :
-                          job.platform === 'Khamsat' ? 'bg-orange-500/10 text-orange-400 border border-orange-500/20' :
-                          'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                          'bg-orange-500/10 text-orange-400 border border-orange-500/20'
                         }`}>
                           {job.platform === 'Mostaql' && (
                             <span className="w-3 w-3 rounded-full bg-blue-500 flex items-center justify-center text-[7px] font-extrabold text-white select-none">M</span>
                           )}
                           {job.platform === 'Khamsat' && (
                             <span className="w-3 w-3 rounded-full bg-orange-500 flex items-center justify-center text-[7px] font-extrabold text-white select-none">٥</span>
-                          )}
-                          {job.platform === 'Fiverr' && (
-                            <span className="w-3 w-3 rounded-full bg-emerald-550 flex items-center justify-center text-[7px] font-extrabold text-white select-none">f</span>
                           )}
                           {job.platform}
                         </span>
@@ -422,26 +417,19 @@ export default function DashboardView({ onNavigate, onShowToast }: DashboardView
                     <svg viewBox="0 0 36 36" className="w-full h-full transform -rotate-90">
                       <circle cx="18" cy="18" r="14" fill="none" stroke="#121522" strokeWidth="4.5" />
                       
-                      {/* Fiverr slice limit */}
-                      <circle 
-                        cx="18" cy="18" r="14" fill="none" 
-                        stroke="#10b981" strokeWidth="5" 
-                        strokeDasharray={`${isNaN(fivPct) ? 33 : Math.round(fivPct * 88)} 88`} 
-                        strokeDashoffset="0"
-                      />
                       {/* Mostaql slice limit */}
                       <circle 
                         cx="18" cy="18" r="14" fill="none" 
                         stroke="#3b82f6" strokeWidth="5" 
-                        strokeDasharray={`${isNaN(mosPct) ? 33 : Math.round(mosPct * 88)} 88`} 
-                        strokeDashoffset={`-${isNaN(fivPct) ? 33 : Math.round(fivPct * 88)}`}
+                        strokeDasharray={`${isNaN(mosPct) ? 44 : Math.round(mosPct * 88)} 88`} 
+                        strokeDashoffset="0"
                       />
                       {/* Khamsat slice limit */}
                       <circle 
                         cx="18" cy="18" r="14" fill="none" 
                         stroke="#f97316" strokeWidth="5" 
-                        strokeDasharray={`${isNaN(khPct) ? 22 : Math.round(khPct * 88)} 88`} 
-                        strokeDashoffset={`-${isNaN(fivPct) ? 33 : Math.round((fivPct + mosPct) * 88)}`}
+                        strokeDasharray={`${isNaN(khPct) ? 44 : Math.round(khPct * 88)} 88`} 
+                        strokeDashoffset={`-${isNaN(mosPct) ? 44 : Math.round(mosPct * 88)}`}
                       />
                     </svg>
                     <div className="absolute text-center">
@@ -451,12 +439,6 @@ export default function DashboardView({ onNavigate, onShowToast }: DashboardView
                   </div>
 
                   <div className="space-y-2 text-xs flex-1">
-                    <div className="flex items-center justify-between font-mono text-[11px]">
-                      <span className="flex items-center gap-2 text-slate-400">
-                        <span className="w-2 h-2 rounded-none bg-emerald-500 block" /> Fiverr
-                      </span>
-                      <span className="font-semibold text-slate-200">{stats.platformsBreakdown.Fiverr}</span>
-                    </div>
                     <div className="flex items-center justify-between font-mono text-[11px]">
                       <span className="flex items-center gap-2 text-slate-400">
                         <span className="w-2 h-2 rounded-none bg-blue-500 block" /> Mostaql

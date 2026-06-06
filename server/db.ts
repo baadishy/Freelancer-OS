@@ -194,7 +194,8 @@ class LocalDB {
 
   // --- Partition Resolution Helpers ---
   private getUserDataOf(userEmail?: string): UserData {
-    const email = userEmail ? userEmail.toLowerCase().trim() : 'default';
+    const activeEmail = userEmail || userSessionStorage.getStore();
+    const email = activeEmail ? activeEmail.toLowerCase().trim() : 'default';
     const currentData = this.load();
     if (!currentData.userData) {
       currentData.userData = {};
@@ -219,7 +220,8 @@ class LocalDB {
   }
 
   private saveUserDataOf(userEmail: string | undefined, fields: Partial<UserData>) {
-    const email = userEmail ? userEmail.toLowerCase().trim() : 'default';
+    const activeEmail = userEmail || userSessionStorage.getStore();
+    const email = activeEmail ? activeEmail.toLowerCase().trim() : 'default';
     const currentData = this.load();
     if (!currentData.userData) {
       currentData.userData = {};
@@ -284,14 +286,14 @@ class LocalDB {
     ]);
   }
 
-  public getAccount(platform: 'Khamsat' | 'Mostaql' | 'Fiverr', userEmail?: string): ConnectedAccount {
+  public getAccount(platform: 'Khamsat' | 'Mostaql', userEmail?: string): ConnectedAccount {
     const accounts = this.getAccounts(userEmail);
     const existing = accounts.find(a => a.platform === platform);
     if (existing) return existing;
     return { platform, status: 'DISCONNECTED' };
   }
 
-  public updateAccount(platform: 'Khamsat' | 'Mostaql' | 'Fiverr', updates: Partial<ConnectedAccount>, userEmail?: string): ConnectedAccount {
+  public updateAccount(platform: 'Khamsat' | 'Mostaql', updates: Partial<ConnectedAccount>, userEmail?: string): ConnectedAccount {
     const userState = this.getUserDataOf(userEmail);
     const accounts = [...(userState.accounts || [])];
     const idx = accounts.findIndex(a => a.platform === platform);
@@ -380,20 +382,25 @@ class LocalDB {
     const opportunities = [...(userState.opportunities || [])];
 
     // Prevent duplicate scrape entry based on ID, original URL, canonical URL
-    const existingIndex = opportunities.findIndex(o => 
-      o.id === op.id || 
-      o.link === op.link ||
-      (op.canonicalUrl && o.canonicalUrl === op.canonicalUrl) ||
-      (op.canonicalUrl && o.link === op.canonicalUrl) ||
-      (o.canonicalUrl && o.canonicalUrl === op.link) ||
-      (
-        o.platform === op.platform &&
-        o.title.trim().toLowerCase() === op.title.trim().toLowerCase() &&
-        o.category.trim().toLowerCase() === op.category.trim().toLowerCase() &&
-        o.clientName.trim().toLowerCase() === op.clientName.trim().toLowerCase() &&
-        o.description.trim().toLowerCase().substring(0, 200) === op.description.trim().toLowerCase().substring(0, 200)
-      )
-    );
+    const existingIndex = opportunities.findIndex(o => {
+      if (o.id === op.id || o.link === op.link) return true;
+      if (op.canonicalUrl && o.canonicalUrl === op.canonicalUrl) return true;
+      if (op.canonicalUrl && o.link === op.canonicalUrl) return true;
+      if (o.canonicalUrl && o.canonicalUrl === op.link) return true;
+      
+      const p1 = o.platform || '';
+      const p2 = op.platform || '';
+      const t1 = (o.title || '').trim().toLowerCase();
+      const t2 = (op.title || '').trim().toLowerCase();
+      const cat1 = (o.category || '').trim().toLowerCase();
+      const cat2 = (op.category || '').trim().toLowerCase();
+      const c1 = (o.clientName || '').trim().toLowerCase();
+      const c2 = (op.clientName || '').trim().toLowerCase();
+      const d1 = (o.description || '').trim().toLowerCase().substring(0, 200);
+      const d2 = (op.description || '').trim().toLowerCase().substring(0, 200);
+
+      return p1 === p2 && t1 === t2 && cat1 === cat2 && c1 === c2 && d1 === d2;
+    });
     if (existingIndex !== -1) {
       return opportunities[existingIndex];
     }

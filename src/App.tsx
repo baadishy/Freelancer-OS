@@ -35,6 +35,51 @@ import AccountsView from './components/AccountsView.tsx';
 import ChatbotWidget from './components/ChatbotWidget.tsx';
 import UrlDebuggerView from './components/UrlDebuggerView.tsx';
 
+// Intercept all fetch requests globally to auto-inject the workspace session authorization header inside iframe sandbox contexts where cookies are commonly blocked.
+if (typeof window !== 'undefined' && window.fetch) {
+  try {
+    // Save original fetch references globally on the window to prevent recursion loops
+    if (!(window as any)._originalWorkspaceFetch) {
+      (window as any)._originalWorkspaceFetch = window.fetch;
+    }
+
+    const customFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const token = localStorage.getItem('freelance_os_token');
+      const urlStr = typeof input === 'string' 
+        ? input 
+        : (input instanceof URL 
+            ? input.toString() 
+            : (input && typeof input === 'object' && 'url' in input ? (input as any).url : '')
+          );
+      
+      if (token && urlStr && urlStr.includes('/api/')) {
+        init = init || {};
+        const headers = new Headers(init.headers || {});
+        if (!headers.has('Authorization')) {
+          headers.set('Authorization', `Bearer ${token}`);
+        }
+        init.headers = headers;
+      }
+      return (window as any)._originalWorkspaceFetch.call(window, input, init);
+    };
+
+    try {
+      // Use Object.defineProperty which works even when the property is read-only (getter-only) but configurable.
+      Object.defineProperty(window, 'fetch', {
+        value: customFetch,
+        configurable: true,
+        writable: true,
+        enumerable: true
+      });
+    } catch (e) {
+      // Direct assignment fallback
+      (window as any).fetch = customFetch;
+    }
+  } catch (error) {
+    console.error('Global fetch interception completely blocked by the environment:', error);
+  }
+}
+
 interface LocalSessionUser {
   name: string;
   email: string;

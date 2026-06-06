@@ -7,6 +7,7 @@ import { chromium, BrowserContext, Page } from 'playwright';
 import path from 'path';
 import fs from 'fs';
 import { db } from './db.js';
+import { getGeminiClient, isGeminiConfigured } from './gemini.js';
 
 // Re-export type definitions to support schema verification if needed
 import { ConnectedAccount } from '../src/types.js';
@@ -108,7 +109,7 @@ export function detectChromePath(): string | undefined {
  * Helper to launch a persistent Playwright browser context using the detected Chrome browser 
  * and persistent storage directories per platform to maintain cookies/sessions across restarts.
  */
-export async function launchPlaywrightPersistent(platform: 'Khamsat' | 'Mostaql' | 'Fiverr', isInteractive: boolean = false): Promise<BrowserContext> {
+export async function launchPlaywrightPersistent(platform: 'Khamsat' | 'Mostaql', isInteractive: boolean = false): Promise<BrowserContext> {
   const profileDir = path.join(process.cwd(), 'data', 'browser-profiles', platform.toLowerCase());
   
   // Ensure profile directory exists
@@ -281,9 +282,9 @@ export async function launchPlaywrightPersistent(platform: 'Khamsat' | 'Mostaql'
 class PlaywrightSessionManager {
   private context: BrowserContext | null = null;
   private page: Page | null = null;
-  private platform: 'Khamsat' | 'Mostaql' | 'Fiverr' | null = null;
+  private platform: 'Khamsat' | 'Mostaql' | null = null;
 
-  public async startSession(platform: 'Khamsat' | 'Mostaql' | 'Fiverr'): Promise<string> {
+  public async startSession(platform: 'Khamsat' | 'Mostaql'): Promise<string> {
     // If there is an existing session, close it first
     await this.closeSession();
 
@@ -298,8 +299,6 @@ class PlaywrightSessionManager {
       startUrl = 'https://khamsat.com/community/requests';
     } else if (platform === 'Mostaql') {
       startUrl = 'https://mostaql.com/projects';
-    } else if (platform === 'Fiverr') {
-      startUrl = 'https://www.fiverr.com';
     }
 
     db.addLog('info', 'system', `Launching interactive persistent context session to connect ${platform}...`);
@@ -417,17 +416,6 @@ class PlaywrightSessionManager {
             username = href?.split('/').pop() || 'Mostaql User';
           }
         }
-      } else if (this.platform === 'Fiverr') {
-        const loginPresent = url.includes('/login') || url.includes('/join');
-        const userMenu = await this.page.$('.logged-in, .user-avatar, a[href*="/logout"], img[src*="user_image"]');
-        if (userMenu || !loginPresent) {
-          const cookies = await this.context?.cookies();
-          const hasSession = cookies?.some(c => c.name.includes('session'));
-          if (hasSession || userMenu) {
-            authenticated = true;
-            username = 'Fiverr Professional';
-          }
-        }
       }
     } catch (e) {
       console.warn('Auth status evaluation exception:', e);
@@ -492,7 +480,7 @@ export const playwrightSession = new PlaywrightSessionManager();
 /**
  * Validates whether the persistent session is still authenticated.
  */
-export async function validatePlatformSession(platform: 'Khamsat' | 'Mostaql' | 'Fiverr'): Promise<{ status: string; username?: string; error?: string }> {
+export async function validatePlatformSession(platform: 'Khamsat' | 'Mostaql'): Promise<{ status: string; username?: string; error?: string }> {
   const profileDir = path.join(process.cwd(), 'data', 'browser-profiles', platform.toLowerCase());
   
   if (!fs.existsSync(profileDir)) {
@@ -511,8 +499,6 @@ export async function validatePlatformSession(platform: 'Khamsat' | 'Mostaql' | 
       checkUrl = 'https://khamsat.com/community/requests';
     } else if (platform === 'Mostaql') {
       checkUrl = 'https://mostaql.com/projects';
-    } else if (platform === 'Fiverr') {
-      checkUrl = 'https://www.fiverr.com';
     }
 
     await page.goto(checkUrl, { waitUntil: 'domcontentloaded', timeout: 20000 });
@@ -554,17 +540,6 @@ export async function validatePlatformSession(platform: 'Khamsat' | 'Mostaql' | 
         if (userElem) {
           const href = await userElem.getAttribute('href');
           username = href?.split('/').pop() || 'Connected User';
-        }
-      }
-    } else if (platform === 'Fiverr') {
-      const loginPresent = url.includes('/login') || url.includes('/join');
-      const userMenu = await page.$('.logged-in, .user-avatar, a[href*="/logout"], img[src*="user_image"]');
-      if (userMenu || !loginPresent) {
-        const cookies = await context.cookies();
-        const hasSession = cookies?.some(c => c.name.includes('session'));
-        if (hasSession || userMenu) {
-          authenticated = true;
-          username = 'Fiverr Partner';
         }
       }
     }
@@ -672,6 +647,19 @@ export async function submitProposalViaPlaywright(proposalId: string): Promise<{
 
     // Enforce Auto-Submission Rules: re-run full validation checks on the page and abort if they fail
     const preSubmissionCheck = await validateOpportunity(platform, op.link, page);
+    
+    // Check if the daily bidding limit has been reached on this platform
+    if (preSubmissionCheck.additionalData?.bidLimitReached) {
+      await takeScreenshot('Bidding Limit Hit');
+      db.updateProposal(proposalId, { submissionError: 'Bidding Limit Reached: You have reached your daily offer limit on Mostaql. Please wait or upgrade your plan.' });
+      db.addLog('warning', 'automation', `[AUTO-SUBMIT ABORT] Cannot submit bid because Mostaql daily offering limit has been hit.`);
+      return {
+        success: false,
+        message: 'Bidding limit reached: You have reached your daily offer limit on Mostaql. Bidding is paused or deferred.',
+        submittedLink: op.link
+      };
+    }
+
     if (!preSubmissionCheck.valid) {
       const failReason = preSubmissionCheck.reason || 'UNAVAILABLE';
       let updatedStatus: any = 'UNAVAILABLE';
@@ -711,8 +699,6 @@ export async function submitProposalViaPlaywright(proposalId: string): Promise<{
       const loginPresent = url.includes('/login') || url.includes('/register');
       const userMenu = await page.$('a[href*="/u/"], .user-menu, a[href*="/logout"]');
       if (userMenu || !loginPresent) authenticated = true;
-    } else if (platform === 'Fiverr') {
-      authenticated = true; // For Fiverr, custom seller contact pages are accessed
     }
 
     if (!authenticated) {
@@ -734,7 +720,21 @@ export async function submitProposalViaPlaywright(proposalId: string): Promise<{
       if (textarea) {
         await textarea.fill(prop.content);
         await page.waitForTimeout(500);
-        await takeScreenshot('2. Form Textarea Filled');
+
+        // Turn on the terms confirmation checkbox if it exists on the form
+        const checkbox = await page.$('input#confirm, input[name="confirm"], input[type="checkbox"]');
+        if (checkbox) {
+          db.addLog('info', 'automation', `Locating and checking Khamsat terms confirmation checkbox...`);
+          try {
+            await checkbox.check({ force: true });
+          } catch (e: any) {
+            // Sibling click fallback as backup
+            await page.click('label[for="confirm"]').catch(() => {});
+          }
+          await page.waitForTimeout(500);
+        }
+
+        await takeScreenshot('2. Form Textarea Filled and Confirmed');
 
         const submitBtn = await page.$('input[type="submit"], button[type="submit"], button:has-text("أضف"), input[value*="أضف"]');
         if (submitBtn) {
@@ -754,18 +754,20 @@ export async function submitProposalViaPlaywright(proposalId: string): Promise<{
         throw new Error('Could not find reply input textarea on page. Form might be closed, or UI changed.');
       }
     } else if (platform === 'Mostaql') {
-      const textarea = await page.$('textarea[name="comment"], textarea#comment, textarea[name="description"], textarea');
+      // Find the main details / proposal text input precisely first
+      const textarea = await page.$('#bid__details, textarea[name="details"], textarea[name="comment"], textarea#comment, textarea[name="description"]');
       if (textarea) {
+        db.addLog('info', 'automation', `Filing main Mostaql proposal details field...`);
         await textarea.fill(prop.content);
         await page.waitForTimeout(500);
 
-        // Calculate custom cost & period values based on user definitions
+        // Calculate custom cost & period values based on user definitions or fallbacks
         const matches = (op.budget || '').match(/\d+/g);
         const fallbackCost = matches && matches.length > 0 ? parseInt(matches[0], 10) : 25;
         const bidCost = prop.cost !== undefined ? prop.cost : (op.cost !== undefined ? op.cost : fallbackCost);
         const bidPeriod = prop.period !== undefined ? prop.period : (op.period !== undefined ? op.period : 10);
 
-        db.addLog('info', 'automation', `Mostaql automatic form filling - price: $${bidCost}, duration: ${bidPeriod} days...`);
+        db.addLog('info', 'automation', `Mostaql standard fields - price: $${bidCost}, duration: ${bidPeriod} days...`);
 
         const durationInput = await page.$('#bid__period, input[name="period"], input[name="duration"], input#duration, input[type="number"]');
         if (durationInput) {
@@ -776,30 +778,181 @@ export async function submitProposalViaPlaywright(proposalId: string): Promise<{
           await costInput.fill(String(bidCost)).catch(() => {});
         }
 
-        await takeScreenshot('2. Proposal and Budget Fields Filled');
+        // Scan for custom input and question fields under the standard bid form
+        const customFields = await page.evaluate(() => {
+          const fields: { selector: string; id: string; name: string; labelText: string; type: string }[] = [];
+          
+          const form = document.querySelector('#project__bid') || document.querySelector('form[name="project__bid"]') || document;
+          const textareas = Array.from(form.querySelectorAll('textarea'));
+          const inputs = Array.from(form.querySelectorAll('input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="checkbox"]):not([type="radio"])'));
 
-        const submitBtn = await page.$('button[type="submit"], #submit-btn, button:has-text("أضف"), button:has-text("عفر")');
+          const findLabel = new Function('el', `
+            let sibling = el.previousElementSibling;
+            while (sibling) {
+              if (sibling.tagName === 'LABEL' || sibling.classList.contains('control-label')) {
+                return sibling.textContent?.trim() || '';
+              }
+              const lbl = sibling.querySelector('label, .control-label');
+              if (lbl) return lbl.textContent?.trim() || '';
+              sibling = sibling.previousElementSibling;
+            }
+            
+            let parent = el.parentElement;
+            for (let d = 0; d < 4; d++) {
+              if (!parent) break;
+              
+              let pSib = parent.previousElementSibling;
+              while (pSib) {
+                if (pSib.tagName === 'LABEL' || pSib.classList.contains('control-label')) {
+                  return pSib.textContent?.trim() || '';
+                }
+                const lbl = pSib.querySelector('label, .control-label');
+                if (lbl) return lbl.textContent?.trim() || '';
+                pSib = pSib.previousElementSibling;
+              }
+              parent = parent.parentElement;
+            }
+            return '';
+          `) as (el: HTMLElement) => string;
+
+          for (const ta of textareas) {
+            const id = ta.id || '';
+            const name = ta.getAttribute('name') || '';
+            const isStandard = id === 'bid__period' || id === 'bid__cost' || id === 'bid__details' || id === 'bid__realCost' ||
+                   name === 'period' || name === 'cost' || name === 'details' || name === 'realCost' ||
+                   id === 'comment' || name === 'comment' || id === 'details';
+            if (isStandard) continue;
+
+            fields.push({
+              selector: `textarea[name="${name}"]`,
+              id: ta.id || '',
+              name: name,
+              labelText: findLabel(ta) || 'سؤال إضافي',
+              type: 'textarea'
+            });
+          }
+
+          for (const inp of inputs) {
+            const id = inp.id || '';
+            const name = inp.getAttribute('name') || '';
+            const isStandard = id === 'bid__period' || id === 'bid__cost' || id === 'bid__details' || id === 'bid__realCost' ||
+                   name === 'period' || name === 'cost' || name === 'details' || name === 'realCost' ||
+                   id === 'comment' || name === 'comment' || id === 'details';
+            if (isStandard) continue;
+
+            fields.push({
+              selector: `input[name="${name}"]`,
+              id: inp.id || '',
+              name: name,
+              labelText: findLabel(inp as HTMLElement) || 'حقل إضافي',
+              type: 'text'
+            });
+          }
+
+          return fields;
+        });
+
+        // Answer custom fields automatically via Gemini AI or template answers
+        if (customFields.length > 0) {
+          db.addLog('info', 'automation', `Detected ${customFields.length} custom input/question fields on Mostaql bidding form! Proceeding to answer...`);
+          const profile = db.getProfile();
+
+          for (const fd of customFields) {
+            let answer = '';
+            const cleanLabel = fd.labelText.replace(/[*\s]+/g, ' ').trim();
+
+            if (isGeminiConfigured()) {
+              try {
+                const ai = getGeminiClient();
+                db.addLog('info', 'automation', `Generating professional, tailored answer for question: "${cleanLabel}"...`);
+                
+                const prompt = `
+أنت خبير ومستقل محترف تقدم عرضاً على مشروع في منصة مستقل.
+تفاصيل المشروع الحالي:
+- العنوان: ${op.title}
+- الوصف الكامل للمشروع: ${op.description}
+
+معلومات المستقل (أنت):
+- المهارات: ${profile.skills?.join(', ') || ''}
+- التقنيات: ${profile.technologies?.join(', ') || ''}
+- مستوى الخبرة: ${profile.experience || 'expert'}
+
+مسودة عرضك الرئيسي المكتوب للمشروع:
+"""
+${prop.content}
+"""
+
+صاحب المشروع وضع سؤالاً إضافياً إلزامياً في نموذج تقديم العرض:
+السؤال: "${cleanLabel}"
+
+يرجى كتابة إجابة احترافية، مقنعة وذكية ومختصرة على هذا السؤال بناءً على مهاراتك وتفاصيل المشروع وعرضك السابق.
+اكتب الإجابة باللغة العربية الفصحى فقط وبدون أي نصوص تمهيدية، أو علامات توضيحية، أو علامات اقتباس. أخرج الإجابة المباشرة فقط لتعبئتها في النموذج مباشرة.
+`;
+                const aiResponse = await ai.models.generateContent({
+                  model: 'gemini-2.1-flash',
+                  contents: prompt,
+                  config: {
+                    temperature: 0.6,
+                    maxOutputTokens: 600
+                  }
+                });
+                answer = aiResponse.text?.trim() || '';
+              } catch (err: any) {
+                db.addLog('warning', 'automation', `Failed to generate answer via Gemini for "${fd.labelText}": ${err.message}. Using high-quality default fallback.`);
+              }
+            }
+
+            if (!answer) {
+              const textStr = fd.labelText;
+              if (textStr.includes('نموذج') || textStr.includes('سابقة') || textStr.includes('بأعمال') || textStr.includes('معرض') || textStr.includes('أعمال')) {
+                answer = `أهلاً بك، لقد قمت بإنجاز وتطوير العديد من الخدمات والمشاريع المماثلة والناجحة، وتجد نماذج وتفاصيل وافية عنها في معرض أعمالي المحدث على المنصة، ويسعدني استعراضها وتزويدك بروابطها المباشرة بمجرد تواصلك لمناقشة المتطلبات.`;
+              } else if (textStr.includes('تقنيات') || textStr.includes('التقنيات') || textStr.includes('أدوات') || textStr.includes('لغة') || textStr.includes('برمجة')) {
+                answer = `سأعتمد على أحدث وأكفأ التقنيات البرمجية والحديثة الموثوقة والملائمة تماماً لطبيعة مشروعك، لضمان أعلى مستويات الأداء، الأمان، وقابلية التوسع في المستقبل.`;
+              } else if (textStr.includes('وقت') || textStr.includes('زمن') || textStr.includes('تفرغ')) {
+                answer = `أنا متفرغ تماماً للبدء الفوري بالعمل على المشروع، وسألتزم بجدول زمني دقيق وتقسيم لمراحل الإنجاز لمتابعة التقدم خطوة بخطوة حتى التسليم النهائي.`;
+              } else {
+                answer = `أهلاً بك. قمت بقراءة وفهم كافة تفاصيل المشروع ومستعد وجاهز تماماً للتنفيذ وفق أعلى معايير الجودة والاحترافية. يشرفني العمل والمتابعة معك.`;
+              }
+            }
+
+            db.addLog('info', 'automation', `Filling custom field "${fd.labelText}" with answer: "${answer.slice(0, 70)}..."`);
+            if (fd.id) {
+              await page.fill(`#${fd.id}`, answer).catch(async () => {
+                await page.fill(fd.selector, answer).catch(() => {});
+              });
+            } else {
+              await page.fill(fd.selector, answer).catch(() => {});
+            }
+            await page.waitForTimeout(500);
+          }
+        }
+
+        // Notify user about any non-standard complex elements found (such as dropzones, popups or manual verification issues)
+        const attachmentsExist = await page.$('.dz-clickable, #bid-attachments, input[type="file"]');
+        if (attachmentsExist) {
+          db.addLog('info', 'automation', `Note: Found optional file attachment dropzone container. Leaving attachments empty for direct proposal text.`);
+        }
+
+        await takeScreenshot('2. Proposal and All Fields Filled Successfully');
+
+        // Locate submit button and click it to make the bid
+        const submitBtn = await page.$('#bid__submit, button[type="submit"], #submit-btn, button:has-text("أضف"), button:has-text("عفر")');
         if (submitBtn) {
           db.addLog('info', 'automation', `Clicking Mostaql proposal submit button...`);
           await submitBtn.click();
-          await page.waitForTimeout(4500);
+          await page.waitForTimeout(5000);
           await takeScreenshot('3. Post Submission Page State');
-          detailsStr = 'Mostaql proposal inputs filled and bidding completed automatically!';
+          detailsStr = 'Mostaql proposal inputs and all custom custom fields filled and bidding completed automatically!';
         } else {
           db.addLog('info', 'automation', `Submit button query empty. Dispatching Enter key...`);
           await textarea.press('Enter');
-          await page.waitForTimeout(4500);
+          await page.waitForTimeout(5000);
           await takeScreenshot('3. Post Submission (Enter Dispatched)');
           detailsStr = 'Feedback textarea filled and Enter dispatched!';
         }
       } else {
         throw new Error('Bidding inputs or comment form not accessible on Mostaql project page.');
       }
-    } else if (platform === 'Fiverr') {
-      db.addLog('info', 'automation', `Scanning Fiverr gig opportunities on ${op.link}...`);
-      await page.waitForTimeout(1000);
-      await takeScreenshot('Fiverr Opportunity Scanned');
-      detailsStr = 'Page scanned and contact flow validated over authenticated Fiverr persistent session.';
     }
 
     db.updateProposal(proposalId, { submissionError: undefined });
@@ -1004,7 +1157,10 @@ export async function extractKhamsatOpportunity(page: Page, url: string): Promis
       return { valid: false, reason: 'INVALID', title, description: 'No description found', budget: '', clientName: '', category: '', language: 'ar' };
     }
 
-    const clientName = await page.$eval('.post-user a, a[href*="/user/"], .username', el => el.textContent?.trim()).catch(() => '') || 'Khamsat Client';
+    let clientName = await page.$eval('a.sidebar_user, .post-user a, a[href*="/user/"], .username', el => el.textContent?.trim()).catch(() => '') || 'Khamsat Client';
+    if (clientName) {
+      clientName = clientName.replace(/^\.+/, '').trim();
+    }
 
     const budget = await page.evaluate(() => {
       const bodyText = document.body.textContent || '';
@@ -1019,6 +1175,23 @@ export async function extractKhamsatOpportunity(page: Page, url: string): Promis
 
     // Extract the published date from metadata or full-text, supporting phrases like "منذ 4 أيام و23 ساعة"
     const publishedAt = await page.evaluate(() => {
+      // High fidelity specific sidebar layout selector matching first:
+      const sidebar = document.getElementById('sidebar') || document.querySelector('#sidebar');
+      if (sidebar) {
+        const col6s = Array.from(sidebar.querySelectorAll('.col-6'));
+        for (let i = 0; i < col6s.length - 1; i++) {
+          const labelText = col6s[i].textContent || '';
+          if (labelText.includes('تاريخ النشر')) {
+            const valueSpan = col6s[i + 1] ? col6s[i + 1].querySelector('span') : null;
+            if (valueSpan && valueSpan.textContent) {
+              return valueSpan.textContent.trim();
+            }
+            const blockText = col6s[i + 1] ? col6s[i + 1].textContent?.trim() : null;
+            if (blockText) return blockText;
+          }
+        }
+      }
+
       // 1. Check table cells or meta items for "تاريخ النشر" (date of publishing) or "منذ"
       const tdList = Array.from(document.querySelectorAll('td, span, div, li, p, section'));
       
@@ -1097,81 +1270,8 @@ export async function extractKhamsatOpportunity(page: Page, url: string): Promis
   }
 }
 
-export async function extractFiverrOpportunity(page: Page, url: string): Promise<{
-  valid: boolean;
-  reason: string | null;
-  title: string;
-  description: string;
-  budget: string;
-  clientName: string;
-  category: string;
-  language: 'ar' | 'en';
-}> {
-  try {
-    const mainText = await page.textContent('body').catch(() => '') || '';
-    const pageTitle = await page.title().catch(() => '') || '';
-
-    db.addLog('info', 'scraper', `[FIVERR-EXTRACT] Checking Fiverr page elements: ${url}`);
-
-    if (
-      mainText.includes("This gig isn't available now") || 
-      mainText.includes("isn't available now") ||
-      mainText.includes("The page you are looking for can't be found") ||
-      mainText.includes("This page was not found") ||
-      mainText.includes("page is unavailable")
-    ) {
-      return { valid: false, reason: 'UNAVAILABLE', title: '', description: '', budget: '', clientName: '', category: '', language: 'en' };
-    }
-
-    if (mainText.includes('Gig not found') || mainText.includes('This gig has been deleted') || mainText.includes('deleted gig')) {
-      return { valid: false, reason: 'DELETED', title: '', description: '', budget: '', clientName: '', category: '', language: 'en' };
-    }
-    if (mainText.includes('This page is unavailable') || mainText.includes('this user has been paused') || mainText.includes('paused or inactive')) {
-      return { valid: false, reason: 'INACTIVE', title: '', description: '', budget: '', clientName: '', category: '', language: 'en' };
-    }
-    if (pageTitle.includes('404') || mainText.includes('404')) {
-      return { valid: false, reason: 'DELETED', title: '', description: '', budget: '', clientName: '', category: '', language: 'en' };
-    }
-
-    const title = await page.$eval('.gig-title, h1, .gig-wrapper h1, .main-title', el => el.textContent?.trim()).catch(() => '') || '';
-    if (!title || title.length < 4) {
-      return { valid: false, reason: 'UNAVAILABLE', title: '', description: '', budget: '', clientName: '', category: '', language: 'en' };
-    }
-
-    const description = await page.$eval('.faq-description, .gig-description, .description, .description-wrapper', el => el.textContent?.trim()).catch(() => '') || '';
-    if (!description || description.length < 15) {
-      return { valid: false, reason: 'UNAVAILABLE', title, description: 'No description found', budget: '', clientName: '', category: '', language: 'en' };
-    }
-
-    const clientName = await page.$eval('.seller-name, .user-name, .seller-username', el => el.textContent?.trim()).catch(() => '') || 'Fiverr Buyer';
-
-    const budget = await page.evaluate(() => {
-      const priceElem = document.querySelector('.price, .starter-price, .package-price, [class*="price-val"]');
-      if (priceElem) {
-        return `$${priceElem.textContent?.trim().replace(/\D/g, '') || '50'}`;
-      }
-      return '$75';
-    });
-
-    const category = 'Web Development';
-
-    return {
-      valid: true,
-      reason: null,
-      title,
-      description,
-      budget,
-      clientName,
-      category,
-      language: 'en'
-    };
-  } catch (err: any) {
-    return { valid: false, reason: 'UNAVAILABLE', title: '', description: '', budget: '', clientName: '', category: '', language: 'en' };
-  }
-}
-
 export async function validateOpportunity(
-  platform: 'Khamsat' | 'Mostaql' | 'Fiverr',
+  platform: 'Khamsat' | 'Mostaql',
   url: string,
   existingPage?: Page,
   expectedTitle?: string,
@@ -1209,19 +1309,6 @@ export async function validateOpportunity(
     if (!isRequest && !isService) {
       return { valid: false, reason: 'INVALID_PAGE' };
     }
-  } else if (platform === 'Fiverr') {
-    if (
-      lowerUrl.includes('/search/') ||
-      lowerUrl.includes('/categories/') ||
-      lowerUrl.includes('/support') ||
-      lowerUrl.includes('/users/') || 
-      lowerUrl.includes('/profile/') ||
-      lowerUrl.includes('preview=true') ||
-      lowerUrl.includes('/inbox') ||
-      lowerUrl.includes('/conversations')
-    ) {
-      return { valid: false, reason: 'INVALID_PAGE' };
-    }
   }
 
   let localContext: BrowserContext | null = null;
@@ -1240,7 +1327,7 @@ export async function validateOpportunity(
     const resolved = await resolveAndValidateUrl(platform, url, page, expectedTitle, boardData);
     
     return {
-      valid: resolved.validationStatus === 'VALID' && resolved.healthScore >= 80,
+      valid: resolved.validationStatus === 'VALID',
       reason: resolved.validationReason,
       canonicalUrl: resolved.canonicalUrl,
       additionalData: resolved
@@ -1258,7 +1345,7 @@ export async function validateOpportunity(
 /**
  * Scrapes project lists from the freelance platform using the persistent Chrome session profile.
  */
-export async function scrapePlatformJobsPlaywright(platform: 'Khamsat' | 'Mostaql' | 'Fiverr', skills?: string[]): Promise<any[]> {
+export async function scrapePlatformJobsPlaywright(platform: 'Khamsat' | 'Mostaql', skills?: string[]): Promise<any[]> {
   const profileDir = path.join(process.cwd(), 'data', 'browser-profiles', platform.toLowerCase());
   
   if (!fs.existsSync(profileDir)) {
@@ -1288,11 +1375,6 @@ export async function scrapePlatformJobsPlaywright(platform: 'Khamsat' | 'Mostaq
       activeSkills.slice(0, 3).forEach(skill => {
         targetUrls.push(`https://mostaql.com/projects?keyword=${encodeURIComponent(skill)}&sort=latest`);
       });
-    } else if (platform === 'Fiverr') {
-      targetUrls.push(`https://www.fiverr.com/search/gigs?query=Web%20Development`);
-      if (activeSkills.length > 0) {
-        targetUrls.push(`https://www.fiverr.com/search/gigs?query=${encodeURIComponent(activeSkills[0])}`);
-      }
     }
 
     db.addLog('info', 'scraper', `[SCRAPER] Initiating multi-URL target discovery scan on ${platform} across ${targetUrls.length} pages.`);
@@ -1389,27 +1471,6 @@ export async function scrapePlatformJobsPlaywright(platform: 'Khamsat' | 'Mostaq
             }
             return list;
           });
-        } else if (platform === 'Fiverr') {
-          subCandidates = await page.evaluate(() => {
-            const anchors = Array.from(document.querySelectorAll('a'));
-            const list: any[] = [];
-            const seen = new Set<string>();
-            for (const a of anchors) {
-              const href = a.href || '';
-              const isGig = href.includes('/gigs/') || href.includes('/services/') || href.match(/fiverr\.com\/[a-zA-Z0-9_\-]+\/[a-zA-Z0-9_\-]+/);
-              if (isGig && !href.includes('/search/') && !href.includes('/categories/') && !href.includes('/support') && !href.includes('/users/') && !href.includes('/profile/') && !seen.has(href)) {
-                const cleanUrl = href.split('?')[0];
-                if (!seen.has(cleanUrl)) {
-                  seen.add(cleanUrl);
-                  list.push({
-                    url: cleanUrl,
-                    expectedTitle: a.textContent?.trim() || ''
-                  });
-                }
-              }
-            }
-            return list;
-          });
         }
 
         for (const item of subCandidates) {
@@ -1481,12 +1542,16 @@ export async function scrapePlatformJobsPlaywright(platform: 'Khamsat' | 'Mostaq
         const details = valResponse.additionalData;
 
         // Duplicate check
-        const isDuplicate = db.getOpportunities().some(o => 
-          o.platform === platform &&
-          o.title.trim().toLowerCase() === details.title.trim().toLowerCase() &&
-          o.clientName.trim().toLowerCase() === details.clientName.trim().toLowerCase() &&
-          o.description.trim().toLowerCase().substring(0, 150) === details.description.trim().toLowerCase().substring(0, 150)
-        );
+        const isDuplicate = db.getOpportunities().some(o => {
+          if (o.platform !== platform) return false;
+          const t1 = (o.title || '').trim().toLowerCase();
+          const t2 = (details.title || '').trim().toLowerCase();
+          const c1 = (o.clientName || '').trim().toLowerCase();
+          const c2 = (details.clientName || '').trim().toLowerCase();
+          const d1 = (o.description || '').trim().toLowerCase().substring(0, 150);
+          const d2 = (details.description || '').trim().toLowerCase().substring(0, 150);
+          return t1 === t2 && c1 === c2 && d1 === d2;
+        });
 
         if (isDuplicate) {
           db.addLog('info', 'scraper', `[SCRAPER Skip DUP] Candidate ${cand.url} is already registered in DB.`);
@@ -1593,7 +1658,7 @@ export async function scrapePlatformJobsPlaywright(platform: 'Khamsat' | 'Mostaq
  * and runs standard authentication verification.
  */
 export async function importCookiesToPlatform(
-  platform: 'Khamsat' | 'Mostaql' | 'Fiverr',
+  platform: 'Khamsat' | 'Mostaql',
   cookiesList: any[]
 ): Promise<{ success: boolean; username?: string; error?: string }> {
   const profileDir = path.join(process.cwd(), 'data', 'browser-profiles', platform.toLowerCase());
@@ -1623,8 +1688,6 @@ export async function importCookiesToPlatform(
         cDomain = '.khamsat.com';
       } else if (platform === 'Mostaql' && !cDomain.includes('mostaql.com')) {
         cDomain = '.mostaql.com';
-      } else if (platform === 'Fiverr' && !cDomain.includes('fiverr.com')) {
-        cDomain = '.fiverr.com';
       }
 
       // Safe expiration mapping
@@ -1665,8 +1728,6 @@ export async function importCookiesToPlatform(
       checkUrl = 'https://khamsat.com/community/requests';
     } else if (platform === 'Mostaql') {
       checkUrl = 'https://mostaql.com/projects';
-    } else if (platform === 'Fiverr') {
-      checkUrl = 'https://www.fiverr.com';
     }
 
     await page.goto(checkUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
@@ -1695,17 +1756,6 @@ export async function importCookiesToPlatform(
         if (userElem) {
           const href = await userElem.getAttribute('href');
           username = href?.split('/').pop() || 'Verified Mostaql Operator';
-        }
-      }
-    } else if (platform === 'Fiverr') {
-      const loginPresent = url.includes('/login') || url.includes('/join');
-      const userMenu = await page.$('.logged-in, .user-avatar, a[href*="/logout"]');
-      if (userMenu || !loginPresent) {
-        const cookies = await context.cookies();
-        const hasSession = cookies?.some(c => c.name.includes('session'));
-        if (hasSession || userMenu) {
-          authenticated = true;
-          username = 'Fiverr Connected Partner';
         }
       }
     }

@@ -42,23 +42,6 @@ const SEED_ANALYTICS: ScraperAnalytics = {
       simulatedCount: 17,
       highMatchCount: 14,
       proposalCapableCount: 30
-    },
-    Fiverr: {
-      platform: 'Fiverr',
-      candidatesDiscovered: 50,
-      validationPassed: 30,
-      validationFailed: 20,
-      redirected: 2,
-      closed: 5,
-      deleted: 3,
-      private: 4,
-      contentMismatch: 2,
-      cannotApply: 4,
-      softInvalid: 0,
-      realCount: 20,
-      simulatedCount: 10,
-      highMatchCount: 8,
-      proposalCapableCount: 18
     }
   },
   topSkills: {
@@ -162,7 +145,7 @@ export function saveScraperAnalytics(analytics: ScraperAnalytics, userEmail?: st
  * Records a single outcome from a crawler discovery candidates scan
  */
 export function recordDiscovery(
-  platform: 'Khamsat' | 'Mostaql' | 'Fiverr',
+  platform: 'Khamsat' | 'Mostaql',
   metrics: {
     candidatesDiscovered?: number;
     passed?: boolean;

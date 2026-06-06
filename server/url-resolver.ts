@@ -51,6 +51,7 @@ export interface ResolvedOpportunityData {
   descriptionSimilarity?: number;
   semanticValidation?: boolean;
   semanticValidationReason?: string;
+  bidLimitReached?: boolean;
 }
 
 /**
@@ -302,7 +303,7 @@ export function calculateOpportunityHealth(data: Partial<ResolvedOpportunityData
   }
 
   // 2. Proposal Submission Capability
-  if (!data.canApply) {
+  if (!data.canApply && !data.bidLimitReached) {
     score -= 30; // Deduct for disabled proposal forms
   }
 
@@ -355,7 +356,7 @@ export function calculateOpportunityHealth(data: Partial<ResolvedOpportunityData
 /**
  * Sweeps page contents to detect specific Arabic and English access failure triggers.
  */
-export function detectAccessRejections(platform: 'Khamsat' | 'Mostaql' | 'Fiverr', text: string): { blocked: boolean; reason: string | null } {
+export function detectAccessRejections(platform: 'Khamsat' | 'Mostaql', text: string): { blocked: boolean; reason: string | null } {
   const normText = text.toLowerCase();
 
   if (platform === 'Mostaql') {
@@ -378,7 +379,7 @@ export function detectAccessRejections(platform: 'Khamsat' | 'Mostaql' | 'Fiverr
     if (normText.includes('تم حذف الخدمة') || normText.includes('تم حذف الموضوع') || normText.includes('الموضوع محذوف')) {
       return { blocked: true, reason: 'DELETED' };
     }
-    if (normText.includes('لا توجد صلاحية לדخول الصفحة') || normText.includes('لا توجد لديك الصلاحية') || normText.includes('لا توجد صلاحية لدخول')) {
+    if (normText.includes('لا توجد صلاحية لدخول الصفحة') || normText.includes('لا توجد لديك الصلاحية') || normText.includes('لا توجد صلاحية لدخول')) {
       return { blocked: true, reason: 'PRIVATE' };
     }
     if (normText.includes('الحساب موقوف') || normText.includes('تم إيقاف الحساب') || normText.includes('الحساب مغلق')) {
@@ -386,16 +387,6 @@ export function detectAccessRejections(platform: 'Khamsat' | 'Mostaql' | 'Fiverr
     }
     if (normText.includes('الموضوع مغلق') || normText.includes('تم إغلاق الموضوع') || normText.includes('مغلق بطلب من السائل')) {
       return { blocked: true, reason: 'CLOSED' };
-    }
-  } else if (platform === 'Fiverr') {
-    if (normText.includes("this gig isn't available now") || normText.includes("isn't available now") || normText.includes("page you are looking for can't be found")) {
-      return { blocked: true, reason: 'UNAVAILABLE' };
-    }
-    if (normText.includes('gig not found') || normText.includes('this gig has been deleted') || normText.includes('deleted gig')) {
-      return { blocked: true, reason: 'DELETED' };
-    }
-    if (normText.includes('this page is unavailable') || normText.includes('user has been paused') || normText.includes('paused or inactive')) {
-      return { blocked: true, reason: 'INACTIVE' };
     }
   }
 
@@ -406,7 +397,7 @@ export function detectAccessRejections(platform: 'Khamsat' | 'Mostaql' | 'Fiverr
  * Universal Resolver & Opportunity Verifier Engine
  */
 export async function resolveAndValidateUrl(
-  platform: 'Khamsat' | 'Mostaql' | 'Fiverr',
+  platform: 'Khamsat' | 'Mostaql',
   url: string,
   page: Page,
   expectedTitle?: string,
@@ -453,6 +444,32 @@ export async function resolveAndValidateUrl(
       canonicalUrl = finalUrl;
     }
 
+    // Ensure the canonical URL structure is valid for the given platform and doesn't point to the home page or general directories
+    let lowerCanon = (canonicalUrl || '').toLowerCase();
+    if (platform === 'Khamsat') {
+      const isRequest = lowerCanon.includes('/community/requests') && lowerCanon.match(/\/requests\/\d+/);
+      const isService = lowerCanon.includes('/service/') && lowerCanon.match(/\/service\/\d+/);
+      if (!isRequest && !isService) {
+        canonicalUrl = finalUrl;
+        lowerCanon = (canonicalUrl || '').toLowerCase();
+        const isRequest2 = lowerCanon.includes('/community/requests') && lowerCanon.match(/\/requests\/\d+/);
+        const isService2 = lowerCanon.includes('/service/') && lowerCanon.match(/\/service\/\d+/);
+        if (!isRequest2 && !isService2) {
+          canonicalUrl = originalUrl;
+        }
+      }
+    } else if (platform === 'Mostaql') {
+      const isProject = lowerCanon.includes('/project/') && lowerCanon.match(/\/project\/\d+/);
+      if (!isProject) {
+        canonicalUrl = finalUrl;
+        lowerCanon = (canonicalUrl || '').toLowerCase();
+        const isProject2 = lowerCanon.includes('/project/') && lowerCanon.match(/\/project\/\d+/);
+        if (!isProject2) {
+          canonicalUrl = originalUrl;
+        }
+      }
+    }
+
     // 3. Platform-specific Page Type Detection
     let pageType: ResolvedOpportunityData['pageType'] = 'UNKNOWN';
     let platformId = '';
@@ -483,19 +500,6 @@ export async function resolveAndValidateUrl(
       } else if (lowerFinal.includes('/company/')) {
         pageType = 'COMPANY';
       }
-    } else if (platform === 'Fiverr') {
-      const matchId = finalUrl.match(/brief_id=([a-f0-9-]+)/i) || finalUrl.match(/\/shares\/(\d+)/i);
-      platformId = matchId ? matchId[1] : '';
-
-      if (lowerFinal.includes('/briefs') || lowerFinal.includes('brief_id=') || lowerFinal.includes('/match/') || lowerFinal.includes('matching_briefs')) {
-        pageType = 'BRIEF';
-      } else if (lowerFinal.includes('/buyer-requests') || lowerFinal.includes('/buyer_requests')) {
-        pageType = 'BUYER_REQUEST';
-      } else if (lowerFinal.includes('/gigs/') || lowerFinal.includes('/share/')) {
-        pageType = 'GIG';
-      } else if (lowerFinal.includes('/users/') || lowerFinal.includes('/profile/')) {
-        pageType = 'PROFILE';
-      }
     }
 
     db.addLog('info', 'scraper', `[RESOLVER] Extracted canonical URL: ${canonicalUrl}. Detected Page Type: ${pageType}`);
@@ -511,11 +515,6 @@ export async function resolveAndValidateUrl(
       const m1 = originalUrl.match(/\/project\/(\d+)/i);
       originalId = m1 ? m1[1] : null;
       const m2 = finalUrl.match(/\/project\/(\d+)/i);
-      finalId = m2 ? m2[1] : null;
-    } else if (platform === 'Fiverr') {
-      const m1 = originalUrl.match(/brief_id=([a-f0-9-]+)/i) || originalUrl.match(/\/shares\/(\d+)/i);
-      originalId = m1 ? m1[1] : null;
-      const m2 = finalUrl.match(/brief_id=([a-f0-9-]+)/i) || finalUrl.match(/\/shares\/(\d+)/i);
       finalId = m2 ? m2[1] : null;
     }
 
@@ -553,30 +552,34 @@ export async function resolveAndValidateUrl(
 
     // 5. Determine Proposal Submission Capability (canSubmitProposal)
     let canApply = false;
+    let bidLimitReached = false;
     if (platform === 'Khamsat') {
       // Check for reply form comments block or textareas
       const replyContainer = await page.$('form.reply-form, #comment_form, #comment-form-textarea, textarea[name="comment_text"], .community-comment-btn');
       const closedKeywordMatch = mainText.includes('الموضوع مغلق') || mainText.includes('تم إغلاق الموضوع') || mainText.includes('مغلق بطلب من السائل');
       canApply = !!replyContainer && !closedKeywordMatch;
     } else if (platform === 'Mostaql') {
+      // Check for Mostaql daily bid limits
+      bidLimitReached = mainText.includes('لا يمكنك تقديم المزيد من العروض الآن') || 
+                        mainText.includes('وصلت للحد الأقصى من عدد العروض') || 
+                        mainText.includes('ترقية الخطة لتحصل على عدد أكبر') ||
+                        mainText.includes('الانتظار حتى إتاحة عروض جديدة');
+      
+      if (bidLimitReached) {
+        db.addLog('info', 'scraper', `[SCRAPER] Account-level biddings limit reached on Mostaql. Flagged bidLimitReached.`);
+      }
+
       // Check for "أضف عرضك" form button or actual add-proposal container
       const addOfferForm = await page.$('#add-proposal-form, #proposal-form, .add-proposal-btn, input[type="submit"][value*="عرض"], button:has-text("أضف عرضك")');
       const textHasAddOffer = mainText.includes('أضف عرضك') || mainText.includes('إضافة عرض') || mainText.includes('أضف العرض');
       const isClosed = mainText.includes('المشروع مغلق') || mainText.includes('مغلق');
-      canApply = (!!addOfferForm || textHasAddOffer) && !isClosed;
-    } else if (platform === 'Fiverr') {
-      // Check for Apply buttons, send offer, or submit request widgets
-      const applyBtn = await page.$('.btn-apply, button.send-offer-btn, .submit-proposal-action, button:has-text("Send Offer"), button:has-text("Submit")');
-      const hasApplyText = mainText.includes('Send Offer') || mainText.includes('Apply Now') || mainText.includes('Submit Proposal');
-      canApply = !!applyBtn || hasApplyText;
+      canApply = (!!addOfferForm || textHasAddOffer) && !isClosed && !bidLimitReached;
     }
 
     // 6. Content Integrity Validation
     const titleSelectors = platform === 'Khamsat' 
       ? ['h1', '.service-title', '.topic-title', '.post-title', 'h2', 'main h1', '.discussion h1']
-      : platform === 'Mostaql' 
-        ? ['h1', '.project-title', '.project-header h1', 'h1.meta-title', 'main h1', '#project-title']
-        : ['.gig-title', 'h1', '.gig-wrapper h1', '.main-title', 'main h1'];
+      : ['h1', '.project-title', '.project-header h1', 'h1.meta-title', 'main h1', '#project-title'];
 
     const descSelectors = platform === 'Khamsat'
       ? ['.post-content', '.service-desc', '.topic-desc', '.details', '.comment_content', '.comment-text', 'article', '.discussion-post', '.post-desc']
@@ -598,7 +601,7 @@ export async function resolveAndValidateUrl(
         : ['.faq-description', '.gig-description', '.description', '.description-wrapper', 'article'];
 
     const clientSelectors = platform === 'Khamsat'
-      ? ['.post-user a', 'a[href*="/user/"]', '.username']
+      ? ['a.sidebar_user', '.post-user a', 'a[href*="/user/"]', '.username']
       : platform === 'Mostaql'
         ? [
             '.profile-details .profile__name bdi',
@@ -645,7 +648,10 @@ export async function resolveAndValidateUrl(
     let extractedClient = '';
     for (const sel of clientSelectors) {
       extractedClient = await page.$eval(sel, el => el.textContent?.trim()).catch(() => '') || '';
-      if (extractedClient) break;
+      if (extractedClient) {
+        extractedClient = extractedClient.replace(/^\.+/, '').trim();
+        break;
+      }
     }
     if (!extractedClient) {
       extractedClient = 'Anonymous client';
@@ -660,7 +666,7 @@ export async function resolveAndValidateUrl(
     // 8. Platform details extraction fallbacks
     let budget = '$100';
     let category = 'Web Development';
-    let language: 'ar' | 'en' = platform === 'Fiverr' ? 'en' : 'ar';
+    let language: 'ar' | 'en' = 'ar';
 
     if (platform === 'Khamsat') {
       const match = mainText.match(/(?:الميزانية|الميزانيه|المبلغ|السعر|بميزانية|بميزانيه|بحدود)\s*[:=]?\s*\$?\s*(\d+)\s*(?:-\s*\$?\s*(\d+))?/i);
@@ -696,17 +702,49 @@ export async function resolveAndValidateUrl(
         return '$100 - $250';
       });
       category = await page.$eval('.project-meta, td:has-text("القسم"), .meta-item', el => el.textContent?.trim()).catch(() => '') || 'Programming & Development';
-    } else if (platform === 'Fiverr') {
-      budget = await page.evaluate(() => {
-        const prEl = document.querySelector('.price, .starter-price, .package-price, [class*="price-val"]');
-        return prEl ? `$${prEl.textContent?.trim().replace(/\D/g, '') || '50'}` : '$75';
-      });
     }
 
     // Resolve date tag details
     let publishedAt = 'Just now';
     if (platform === 'Khamsat') {
       publishedAt = await page.evaluate(() => {
+        // High fidelity specific sidebar layout selector matching:
+        // <div id="sidebar" class="row"> ... <span> تاريخ النشر </span> ... <span>منذ 19 ساعة و40 دقيقة</span>
+        const sidebar = document.getElementById('sidebar') || document.querySelector('#sidebar');
+        if (sidebar) {
+          const col6s = Array.from(sidebar.querySelectorAll('.col-6'));
+          for (let i = 0; i < col6s.length - 1; i++) {
+            const labelText = col6s[i].textContent || '';
+            if (labelText.includes('تاريخ النشر')) {
+              const valueSpan = col6s[i + 1] ? col6s[i + 1].querySelector('span') : null;
+              if (valueSpan && valueSpan.textContent) {
+                return valueSpan.textContent.trim();
+              }
+              const blockText = col6s[i + 1] ? col6s[i + 1].textContent?.trim() : null;
+              if (blockText) return blockText;
+            }
+          }
+        }
+
+        // Generic structural search fallback
+        const allSpans = Array.from(document.querySelectorAll('span, div, td, .col-6'));
+        for (let i = 0; i < allSpans.length; i++) {
+          const text = allSpans[i].textContent || '';
+          if (text.includes('تاريخ النشر') && text.length < 40) {
+            // Check adjacent sibling or nearby nodes
+            const nextNode = allSpans[i].nextElementSibling;
+            if (nextNode) {
+              const nextVal = nextNode.textContent?.trim();
+              if (nextVal) return nextVal;
+            }
+            const parent = allSpans[i].parentElement;
+            if (parent && parent.nextElementSibling) {
+              const nextVal = parent.nextElementSibling.textContent?.trim();
+              if (nextVal) return nextVal;
+            }
+          }
+        }
+
         const list = Array.from(document.querySelectorAll('td, span, div, li, p, section'));
         for (const item of list) {
           const t = item.textContent || '';
@@ -727,11 +765,13 @@ export async function resolveAndValidateUrl(
       }) || 'منذ ساعة';
     } else if (platform === 'Mostaql') {
       publishedAt = await page.evaluate(() => {
+        // High fidelity selector check for:
+        // <div class="meta-row "> <div class="meta-label">تاريخ النشر</div> <div class="meta-value"><time itemprop="datePublished">منذ 28 دقيقة</time></div> </div>
         const metaRows = Array.from(document.querySelectorAll('.meta-row'));
         for (const row of metaRows) {
           const label = row.querySelector('.meta-label')?.textContent || '';
           if (label.includes('تاريخ النشر')) {
-            const timeEl = row.querySelector('time');
+            const timeEl = row.querySelector('time[itemprop="datePublished"]') || row.querySelector('time');
             if (timeEl) {
               return timeEl.textContent?.trim() || '';
             }
@@ -819,6 +859,7 @@ export async function resolveAndValidateUrl(
       pageType,
       platformId,
       canApply,
+      bidLimitReached,
       redirectDetected,
       redirectChain,
       redirectReason,

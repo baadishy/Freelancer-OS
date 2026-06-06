@@ -378,17 +378,13 @@ export default function ProposalQueueView({ onNavigate, onShowToast }: ProposalQ
                         {matchedJob?.platform && (
                           <span className={`inline-flex items-center gap-1 text-[10px] pl-1 pr-2 py-0.5 rounded font-bold uppercase tracking-widest border ${
                             matchedJob.platform === 'Mostaql' ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20' :
-                            matchedJob.platform === 'Khamsat' ? 'bg-orange-500/10 text-orange-400 border border-orange-500/20' :
-                            'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                            'bg-orange-500/10 text-orange-400 border border-orange-500/20'
                           }`}>
                             {matchedJob.platform === 'Mostaql' && (
                               <span className="w-3 w-3 rounded-full bg-blue-500 flex items-center justify-center text-[7px] font-extrabold text-white select-none">M</span>
                             )}
                             {matchedJob.platform === 'Khamsat' && (
                               <span className="w-3 w-3 rounded-full bg-orange-500 flex items-center justify-center text-[7px] font-extrabold text-white select-none">٥</span>
-                            )}
-                            {matchedJob.platform === 'Fiverr' && (
-                              <span className="w-3 w-3 rounded-full bg-emerald-550 flex items-center justify-center text-[7px] font-extrabold text-white select-none">f</span>
                             )}
                             {matchedJob.platform}
                           </span>
